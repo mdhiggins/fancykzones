@@ -1,5 +1,5 @@
 name: Bug Report
-description: Report a bug in KZones
+description: Report a bug in FancyKZones
 labels: ["bug"]
 body:
     - type: checkboxes
@@ -40,17 +40,13 @@ body:
           label: Screenshots
           description: If possible, include screenshots (or a video) to help explain the issue.
     - type: dropdown
-      id: kzones_version
+      id: fancykzones_version
       attributes:
-        label: KZones Version
-        description: You can find this in the about section of KZones in the KWin Script Settings window.
+        label: FancyKZones Version
+        description: You can find this in the about section of FancyKZones in the KWin Script Settings window.
         options:
           - Development build
-          - Release v0.9.1
-          - Release v0.9
-          - Release v0.8
-          - Release v0.7
-          - Older than v0.7
+          - Release (mention the version under System Information)
       validations:
         required: true
     - type: textarea

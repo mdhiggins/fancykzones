@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
- <class>KWin::KZonesConfigForm</class>
- <widget class="QWidget" name="KWin::KZonesConfigForm">
+ <class>KWin::FancyKZonesConfigForm</class>
+ <widget class="QWidget" name="KWin::FancyKZonesConfigForm">
   <property name="geometry">
    <rect>
     <x>0</x>
@@ -316,13 +316,6 @@
            </widget>
           </item>
           <item>
-           <widget class="QCheckBox" name="kcfg_trackLayoutPerScreen">
-            <property name="text">
-             <string>Track active layout per screen</string>
-            </property>
-           </widget>
-          </item>
-          <item>
            <widget class="QCheckBox" name="kcfg_autoSnapAllNew">
             <property name="text">
              <string>Automatically snap all new windows</string>
@@ -381,6 +374,45 @@
             </property>
            </widget>
           </item>
+          <item>
+           <layout class="QHBoxLayout" name="horizontalLayout_dwellSpanning">
+            <item>
+             <widget class="QCheckBox" name="kcfg_enableDwellSpanning">
+              <property name="text">
+               <string>Hold the cursor still on a zone indicator to start spanning</string>
+              </property>
+              <property name="toolTip">
+               <string>While moving a window, hold the cursor still on the indicator in the middle of a zone, or on a zone in the zone selector, until the ring fills up. Spanning then starts from that zone and covers every zone up to the one under the cursor. Move off the indicator and hold still on one again to stop spanning.</string>
+              </property>
+              <property name="checked">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QSpinBox" name="kcfg_dwellSpanningDelay">
+              <property name="toolTip">
+               <string>How long the cursor needs to be held still</string>
+              </property>
+              <property name="suffix">
+               <string> ms</string>
+              </property>
+              <property name="minimum">
+               <number>200</number>
+              </property>
+              <property name="maximum">
+               <number>3000</number>
+              </property>
+              <property name="singleStep">
+               <number>100</number>
+              </property>
+              <property name="value">
+               <number>600</number>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
          </layout>
         </widget>
        </item>
@@ -420,65 +452,21 @@
          </property>
          <layout class="QVBoxLayout" name="verticalLayout_6">
           <item>
-           <widget class="QPlainTextEdit" name="kcfg_layoutsJson">
-            <property name="plainText">
-             <string>[
-    {
-        &quot;name&quot;: &quot;Priority Grid&quot;,
-        &quot;padding&quot;: 0,
-        &quot;zones&quot;: [
-            {
-                &quot;x&quot;: 0,
-                &quot;y&quot;: 0,
-                &quot;height&quot;: 100,
-                &quot;width&quot;: 25
-            },
-            {
-                &quot;x&quot;: 25,
-                &quot;y&quot;: 0,
-                &quot;height&quot;: 100,
-                &quot;width&quot;: 50
-            },
-            {
-                &quot;x&quot;: 75,
-                &quot;y&quot;: 0,
-                &quot;height&quot;: 100,
-                &quot;width&quot;: 25
-            }
-        ]
-    },
-    {
-        &quot;name&quot;: &quot;Quadrant Grid&quot;,
-        &quot;zones&quot;: [
-            {
-                &quot;x&quot;: 0,
-                &quot;y&quot;: 0,
-                &quot;height&quot;: 50,
-                &quot;width&quot;: 50
-            },
-            {
-                &quot;x&quot;: 0,
-                &quot;y&quot;: 50,
-                &quot;height&quot;: 50,
-                &quot;width&quot;: 50
-            },
-            {
-                &quot;x&quot;: 50,
-                &quot;y&quot;: 50,
-                &quot;height&quot;: 50,
-                &quot;width&quot;: 50
-            },
-            {
-                &quot;x&quot;: 50,
-                &quot;y&quot;: 0,
-                &quot;height&quot;: 50,
-                &quot;width&quot;: 50
-            }
-        ]
-    }
-]</string>
+           <widget class="QLabel" name="label_layoutsExplanation">
+            <property name="text">
+             <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Zones are taken from the KWin tiling layout of each screen and virtual desktop.&lt;/p&gt;&lt;p&gt;To edit a layout, press &lt;b&gt;Meta+T&lt;/b&gt; on the screen and virtual desktop you want to change. Changes are picked up automatically.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+            </property>
+            <property name="wordWrap">
+             <bool>true</bool>
             </property>
            </widget>
+          </item>
+          <item>
+           <spacer name="verticalSpacer_layouts">
+            <property name="orientation">
+             <enum>Qt::Vertical</enum>
+            </property>
+           </spacer>
           </item>
          </layout>
         </widget>
@@ -586,7 +574,7 @@
             <item>
              <widget class="QLabel" name="label_shortcutsExplanation">
               <property name="text">
-               <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;To set up shortcuts for this script&lt;/p&gt;&lt;p&gt;Go to System Settings / Shortcuts and search for &amp;quot;KZones&amp;quot;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+               <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;To set up shortcuts for this script&lt;/p&gt;&lt;p&gt;Go to System Settings / Shortcuts and search for &amp;quot;FancyKZones&amp;quot;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
               </property>
               <property name="alignment">
                <set>Qt::AlignCenter</set>
@@ -724,10 +712,10 @@
      <item>
       <widget class="QLabel" name="label_mainBottomLeft">
        <property name="toolTip">
-        <string>https://github.com/gerritdevriese/kzones</string>
+        <string>https://github.com/mdhiggins/FancyKZones</string>
        </property>
        <property name="text">
-        <string>&lt;a href=&quot;https://github.com/gerritdevriese/kzones&quot;&gt;Github page&lt;/a&gt;</string>
+        <string>&lt;a href=&quot;https://github.com/mdhiggins/FancyKZones&quot;&gt;Github page&lt;/a&gt;</string>
        </property>
        <property name="margin">
         <number>8</number>

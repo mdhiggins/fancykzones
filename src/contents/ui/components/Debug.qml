@@ -1,13 +1,12 @@
 import QtQuick
 import QtQuick.Layouts
-
 import "../components" as Components
 
 ColumnLayout {
-    property var config: {}
-    property var info: {}
+    property var config: new Object()
+    property var info: new Object()
     property var errors: []
-    
+
     z: 100
     anchors.left: parent.left
     anchors.leftMargin: 20
@@ -36,7 +35,6 @@ ColumnLayout {
         model: errors
 
         Rectangle {
-        
             Layout.preferredWidth: children[0].paintedWidth + children[0].padding * 2
             Layout.preferredHeight: children[0].paintedHeight + children[0].padding * 2
             color: colorHelper.backgroundColor
@@ -56,5 +54,4 @@ ColumnLayout {
     Components.ColorHelper {
         id: colorHelper
     }
-
 }

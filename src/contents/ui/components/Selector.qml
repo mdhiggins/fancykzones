@@ -7,14 +7,16 @@ Item {
     id: selector
 
     property var config
-    property int currentLayout
+    property var layoutZones: []
     property var highlightedZone: []
+    property bool spanning: false
+    property var spanAnchor: []
 
     property bool expanded: false
     property bool near: false
     property bool animating: false
 
-    property alias repeater: repeater
+    property alias repeater: indicator.repeater
 
     visible: false
     anchors.horizontalCenter: parent.horizontalCenter
@@ -25,7 +27,8 @@ Item {
         NumberAnimation {
             duration: 150
             onRunningChanged: {
-                if (!running) selector.visible = true;
+                if (!running)
+                    selector.visible = true;
                 selector.animating = running;
             }
         }
@@ -44,8 +47,8 @@ Item {
         anchors.bottomMargin: 15
         color: colorHelper.backgroundColor
         radius: 10
-        border.color: colorHelper.getBorderColor(color)
-        border.width: 1
+        border.color: selector.spanning ? colorHelper.accentColor : colorHelper.getBorderColor(color)
+        border.width: selector.spanning ? 2 : 1
 
         RowLayout {
             id: row
@@ -54,20 +57,25 @@ Item {
             anchors.fill: parent
             anchors.margins: spacing
 
-            Repeater {
-                id: repeater
-
-                model: config.layouts
-
-                Components.Indicator {
-                    indicatorZones: modelData.zones
-                    activeZone: (currentLayout == index) ? selector.highlightedZone : []
-                    highlightedZone: (currentLayout == index) ? selector.highlightedZone: []
-                    width: 160 - 30
-                    height: 100 - 30
-                    hovering: (currentLayout == index)
-                }
+            Components.Indicator {
+                id: indicator
+                indicatorZones: selector.layoutZones
+                activeZone: selector.highlightedZone
+                highlightedZone: selector.highlightedZone
+                spanZones: selector.spanning ? selector.highlightedZone : []
+                anchorZones: selector.spanAnchor
+                width: 160 - 30
+                height: 100 - 30
+                Layout.preferredWidth: width
+                Layout.preferredHeight: height
+                hovering: true
             }
+        }
+
+        Components.SpanBadge {
+            shown: selector.spanning
+            anchors.horizontalCenter: parent.right
+            anchors.verticalCenter: parent.top
         }
     }
 

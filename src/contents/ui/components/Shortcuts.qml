@@ -2,190 +2,156 @@ import QtQuick
 import org.kde.kwin
 
 Item {
-
-    signal cycleLayouts()
-
-    ShortcutHandler {
-        name: "KZones: Cycle layouts"
-        text: "KZones: Cycle layouts"
-        sequence: "Ctrl+Alt+D"
-        onActivated: {
-            cycleLayouts();
-        }
-    }
-
-    signal cycleLayoutsReversed()
-
-    ShortcutHandler {
-        name: "KZones: Cycle layouts (reversed)"
-        text: "KZones: Cycle layouts (reversed)"
-        sequence: "Ctrl+Alt+Shift+D"
-        onActivated: {
-            cycleLayoutsReversed();
-        }
-    }
-
-    signal moveActiveWindowToNextZone()
+    signal moveActiveWindowToNextZone
+    signal moveActiveWindowToPreviousZone
+    signal toggleZoneOverlay
+    signal toggleZoneSpanning
+    signal switchToNextWindowInCurrentZone
+    signal switchToPreviousWindowInCurrentZone
+    signal moveActiveWindowToZone(int zone)
+    signal moveActiveWindowUp
+    signal moveActiveWindowDown
+    signal moveActiveWindowLeft
+    signal moveActiveWindowRight
+    signal snapActiveWindow
+    signal snapAllWindows
+    signal restoreActiveWindow
 
     ShortcutHandler {
-        name: "KZones: Move active window to next zone"
-        text: "KZones: Move active window to next zone"
+        name: "FancyKZones: Move active window to next zone"
+        text: "FancyKZones: Move active window to next zone"
         sequence: "Ctrl+Alt+Right"
         onActivated: {
-            moveActiveWindowToNextZone()
+            moveActiveWindowToNextZone();
         }
     }
 
-    signal moveActiveWindowToPreviousZone()
-
     ShortcutHandler {
-        name: "KZones: Move active window to previous zone"
-        text: "KZones: Move active window to previous zone"
+        name: "FancyKZones: Move active window to previous zone"
+        text: "FancyKZones: Move active window to previous zone"
         sequence: "Ctrl+Alt+Left"
         onActivated: {
-            moveActiveWindowToPreviousZone()
+            moveActiveWindowToPreviousZone();
         }
     }
 
-    signal toggleZoneOverlay()
-
     ShortcutHandler {
-        name: "KZones: Toggle zone overlay"
-        text: "KZones: Toggle zone overlay"
+        name: "FancyKZones: Toggle zone overlay"
+        text: "FancyKZones: Toggle zone overlay"
         sequence: "Ctrl+Alt+C"
         onActivated: {
             toggleZoneOverlay();
         }
     }
 
-    signal toggleZoneSpanning()
-
     ShortcutHandler {
-        name: "KZones: Toggle zone spanning"
-        text: "KZones: Toggle zone spanning"
+        name: "FancyKZones: Toggle zone spanning"
+        text: "FancyKZones: Toggle zone spanning"
         sequence: "Ctrl+Alt+V"
         onActivated: {
             toggleZoneSpanning();
         }
     }
 
-    signal switchToNextWindowInCurrentZone()
-
     ShortcutHandler {
-        name: "KZones: Switch to next window in current zone"
-        text: "KZones: Switch to next window in current zone"
+        name: "FancyKZones: Switch to next window in current zone"
+        text: "FancyKZones: Switch to next window in current zone"
         sequence: "Ctrl+Alt+Up"
         onActivated: {
-            switchToNextWindowInCurrentZone()
+            switchToNextWindowInCurrentZone();
         }
     }
 
-    signal switchToPreviousWindowInCurrentZone()
-
     ShortcutHandler {
-        name: "KZones: Switch to previous window in current zone"
-        text: "KZones: Switch to previous window in current zone"
+        name: "FancyKZones: Switch to previous window in current zone"
+        text: "FancyKZones: Switch to previous window in current zone"
         sequence: "Ctrl+Alt+Down"
         onActivated: {
-            switchToPreviousWindowInCurrentZone()
+            switchToPreviousWindowInCurrentZone();
         }
     }
 
-    signal moveActiveWindowToZone(int zone)
-
     Repeater {
         model: [1, 2, 3, 4, 5, 6, 7, 8, 9]
+
         delegate: Item {
             ShortcutHandler {
-                name: "KZones: Move active window to zone " + modelData
-                text: "KZones: Move active window to zone " + modelData
+                name: "FancyKZones: Move active window to zone " + modelData
+                text: "FancyKZones: Move active window to zone " + modelData
                 sequence: "Ctrl+Alt+Num+" + modelData
                 onActivated: {
-                    moveActiveWindowToZone(modelData - 1)
+                    moveActiveWindowToZone(modelData - 1);
                 }
             }
         }
     }
-
-    signal activateLayout(int layout)
 
     Repeater {
         model: [1, 2, 3, 4, 5, 6, 7, 8, 9]
-        delegate: Item {
-            ShortcutHandler {
-                name: "KZones: Activate layout " + modelData
-                text: "KZones: Activate layout " + modelData
-                sequence: "Meta+Num+" + modelData
-                onActivated: {
-                    activateLayout(modelData - 1)
-                }
-            }
-        }
+
+        delegate: Item {}
     }
 
-    signal moveActiveWindowUp()
-
     ShortcutHandler {
-        name: "KZones: Move active window up"
-        text: "KZones: Move active window up"
+        name: "FancyKZones: Move active window up"
+        text: "FancyKZones: Move active window up"
         sequence: "Meta+Up"
         onActivated: {
-            moveActiveWindowUp()
+            moveActiveWindowUp();
         }
     }
 
-    signal moveActiveWindowDown()
-
     ShortcutHandler {
-        name: "KZones: Move active window down"
-        text: "KZones: Move active window down"
+        name: "FancyKZones: Move active window down"
+        text: "FancyKZones: Move active window down"
         sequence: "Meta+Down"
         onActivated: {
-            moveActiveWindowDown()
+            moveActiveWindowDown();
         }
     }
 
-    signal moveActiveWindowLeft()
-
     ShortcutHandler {
-        name: "KZones: Move active window left"
-        text: "KZones: Move active window left"
+        name: "FancyKZones: Move active window left"
+        text: "FancyKZones: Move active window left"
         sequence: "Meta+Left"
         onActivated: {
-            moveActiveWindowLeft()
+            moveActiveWindowLeft();
         }
     }
 
-    signal moveActiveWindowRight()
-
     ShortcutHandler {
-        name: "KZones: Move active window right"
-        text: "KZones: Move active window right"
+        name: "FancyKZones: Move active window right"
+        text: "FancyKZones: Move active window right"
         sequence: "Meta+Right"
         onActivated: {
-            moveActiveWindowRight()
+            moveActiveWindowRight();
         }
     }
 
-    signal snapActiveWindow()
-
     ShortcutHandler {
-        name: "KZones: Snap active window"
-        text: "KZones: Snap active window"
+        name: "FancyKZones: Snap active window"
+        text: "FancyKZones: Snap active window"
         sequence: "Meta+Shift+Space"
         onActivated: {
-            snapActiveWindow()
+            snapActiveWindow();
         }
     }
 
-    signal snapAllWindows()
-
     ShortcutHandler {
-        name: "KZones: Snap all windows"
-        text: "KZones: Snap all windows"
+        name: "FancyKZones: Snap all windows"
+        text: "FancyKZones: Snap all windows"
         sequence: "Meta+Space"
         onActivated: {
-            snapAllWindows()
+            snapAllWindows();
+        }
+    }
+
+    ShortcutHandler {
+        name: "FancyKZones: Restore active window"
+        text: "FancyKZones: Restore active window"
+        sequence: "Meta+Backspace"
+        onActivated: {
+            restoreActiveWindow();
         }
     }
 }

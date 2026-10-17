@@ -1,18 +1,40 @@
-# KZones
+# FancyKZones
 
 <img align="right" width="125" height="75" src="./media/icon.png">
 
 KDE KWin Script for snapping windows into zones. Handy when using a (super) ultrawide monitor, an alternative to PowerToys FancyZones and Windows 11 snap layouts.
 
-[![kde-store](https://img.shields.io/badge/KDE%20Store-download-blue?logo=KDE)](https://store.kde.org/p/1909220)
-[![aur-package](https://img.shields.io/aur/version/kwin-scripts-kzones?logo=archlinux)](https://aur.archlinux.org/packages/kwin-scripts-kzones)
-[![nixos-package](https://img.shields.io/badge/NixOS-package-blue?logo=nixos)](https://mynixos.com/nixpkgs/package/kdePackages.kzones)
+FancyKZones is a fork of [KZones](https://github.com/gerritdevriese/kzones) by gerritdevriese, reworked to look, feel and operate more like [PowerToys FancyZones](https://learn.microsoft.com/windows/powertoys/fancyzones). Zones come from the tiling layouts built into KDE Plasma, windows can span multiple zones, and everything can be done with the mouse alone, as far as the limits of KWin scripts allow.
+
+## What's different from KZones
+
+### Designed to work like FancyZones
+
+Drag a window, see the zones, drop it. While spanning, every zone between the zone you started from and the zone under the cursor is highlighted, so you can see exactly where the window will land, just like FancyZones.
+
+### Mouse-only controls
+
+While dragging, FancyZones uses <kbd>Shift</kbd> or a non-primary mouse button to show the zones and <kbd>Ctrl</kbd> to select multiple zones. KWin scripts can't see mouse buttons or modifier keys during a drag, so FancyKZones uses gestures that only need the cursor instead:
+
+- **Hold still on a zone indicator** to start spanning, a ring around the cursor shows the progress. Move off it and hold still on an indicator again to stop spanning, the ring drains instead.
+- **Bump a window into the edge of the screen** to show or hide the zone overlay.
+- **Drop a window close to the border between zones** to span both of them.
+
+The keyboard [shortcuts](#shortcuts) still work too, including shortcuts to toggle the overlay and spanning while dragging.
+
+### Zones from KWin tiling
+
+There are no JSON layouts to maintain. Zones are the tiles of the KWin tiling layout of each screen and virtual desktop, edited with <kbd>Meta</kbd> + <kbd>T</kbd>. A window snapped into a single zone is tiled by KWin itself, so it works together with the built-in tiling features, and spanned windows follow their tiles when the layout is edited.
+
+### Removed
+
+Because layouts now come from KWin, the JSON layouts, layout cycling, the activate layout shortcuts, tracking the layout per screen and the per-zone `applications`, `color` and `indicator` options are gone.
 
 ## Features
 
 ### Zone Selector
 
-The Zone Selector is a small widget that appears when you drag a window to the top of the screen. It allows you to snap the window to a zone regardless of the current layout.
+The Zone Selector is a small widget that appears when you drag a window to the top of the screen. It shows the zones of the current screen and lets you snap the window to one of them.
 
 ![](./media/selector.gif)
 
@@ -28,55 +50,57 @@ Edge Snapping allows you to snap windows to zones by dragging them to the edge o
 
 ![](./media/edgesnapping.gif)
 
-### Multiple Layouts
+### Zone Spanning
 
-Create multiple layouts and cycle between them.
+Drop a window across multiple zones at once. Hold the cursor still on a zone indicator to start spanning from that zone, then drag over the other zones you want. Like FancyZones, the span is always the smallest rectangle of zones covering the zone you started from and the zone under the cursor, so moving back shrinks it again.
 
-![](./media/layouts.gif)
+The overlay makes it clear which mode you are in:
+
+- the zone indicators and the zone selector show the span as a single merged block, with a dot on the zone the span started from
+- a chain link badge pops up on every indicator and the indicator borders light up
+
+![](./media/spanning.gif)
+
+### Edge Bumping
+
+Bump a window into the edge of the screen to show the zone overlay, bump it again to hide it. Useful when the overlay is set to only show when asked for.
+
+### KWin Tiling Layouts
+
+Zones come straight from the tiling layouts built into KDE Plasma. Edit them with <kbd>Meta</kbd> + <kbd>T</kbd>, every screen and virtual desktop has its own layout.
 
 ### Keyboard Shortcuts
 
-KZones comes with a set of [shortcuts](#shortcuts) to move your windows between zones and layouts.
+FancyKZones comes with a set of [shortcuts](#shortcuts) to move your windows between zones.
 
 ![](./media/shortcuts.gif)
 
 ### Theming
 
-By using the same colors as your selected color scheme, KZones will blend in perfectly with your desktop.
+By using the same colors as your selected color scheme, FancyKZones will blend in perfectly with your desktop.
 
 ![](./media/theming.png)
 
 ## Installation
 
-To install KZones you can either use the built-in script manager or clone the repo and build it yourself.
-
-### KWin Script Manager
-
-Navigate to `System Settings / Window Management / KWin Scripts / Get New…` and search for KZones.  
-
-Depending on your Plasma version, one of these packages will be downloaded and installed:
-
-- [KZones](https://store.kde.org/p/1909220)
-- [KZones for Plasma 5](https://store.kde.org/p/2143914)
-
-### Build it yourself
-
-Make sure you have "zip" installed on your system before building.
+Clone the repo and build it yourself, make sure you have "zip" installed on your system before building.
 
 ```sh
-git clone https://github.com/gerritdevriese/kzones
-cd kzones && make
+git clone https://github.com/mdhiggins/FancyKZones
+cd FancyKZones && make
 ```
+
+FancyKZones is installed as a separate script, if you also have KZones installed disable it first so they don't both snap windows.
 
 ## Configuration
 
-The script settings can be found under `System Settings / Window Management / KWin Scripts / KZones / ⚙️`
+The script settings can be found under `System Settings / Window Management / KWin Scripts / FancyKZones / ⚙️`
 
 ### General
 
 #### Zone Selector
 
-The zone selector is a small widget that appears when you drag a window to the top of the screen. It allows you to snap the window to a zone regardless of the current layout.
+The zone selector is a small widget that appears when you drag a window to the top of the screen. It shows the zones of the current screen and lets you snap the window to one of them.
 
 - Enable or disable the zone selector.
 - Set the distance from the top of the screen at which the zone selector will start to appear.
@@ -94,18 +118,14 @@ The zone overlay is a fullscreen overlay that appears when you move a window. It
 
 Edge Snapping allows you to snap windows to zones by dragging them to the edge of the screen. Make sure to disable the default edge snapping functionality before enabling this.
 
-- Enable or disable edge snapping.
-- Set the distance from the edge of the screen at which the edge snapping will start to appear.
+Edge Bumping shows the zone overlay when you bump a window into the edge of the screen, bump again to hide it.
+
+- Choose between edge snapping, edge bumping or disabled.
+- Set the distance from the edge of the screen at which edge snapping or bumping triggers.
 
 #### Remember and restore window geometries
 
 The script will remember the geometry of each window when it's moved to a zone. When the window is moved out of the zone, it will be restored to it's original geometry.
-
-- Enable or disable this behavior.
-
-#### Track active layout per screen
-
-If you have multiple monitors, you can enable this to track the active layout per screen. This will allow you to have different active layouts on different screens.
 
 - Enable or disable this behavior.
 
@@ -115,11 +135,24 @@ When a new window is launched, the script will automatically snap it to its clos
 
 - Enable or disable this behavior.
 
+> [!NOTE]  
+> If you enable this, you should probably add some filters to exclude certain applications from being snapped, like games or other applications that don't work well with tiling.
+> Spectacle is a good example of this, as it won't be able to take screenshots of the entire screen when it's snapped to a zone.
+
 #### Display OSD messages
 
 Disable this if you don't want to see any OSD messages.
 
 - Enable or disable this behavior.
+
+#### Zone spanning
+
+A window can be dropped across multiple zones at once. While spanning, the window covers the smallest rectangle of zones between the zone spanning started from and the zone under the cursor, moving back shrinks the span again.
+
+- Hold the cursor still on the indicator in the middle of a zone (or on a zone in the zone selector) while moving a window, a ring around the cursor fills up and spanning starts from that zone. Move off the indicator and hold still on any zone indicator again to stop spanning, the ring drains instead. The delay can be changed, or this can be disabled.
+- While spanning, the indicators show the span as one merged block and a chain link badge.
+- Press the toggle zone spanning shortcut while moving a window.
+- Set an adjacent zone spanning distance, dropping a window this close to the border between zones spans them.
 
 #### Fade windows while moving
 
@@ -129,159 +162,14 @@ Reduce the opacity of other windows while the active window is being moved.
 
 ### Layouts
 
-You can define your own layouts by modifying the JSON in the **Layouts** tab in the script settings, here are some examples to get you started:
+FancyKZones uses the KWin tiling layout of the screen and virtual desktop the window is on, there is nothing to configure in the script itself.
 
-#### Examples
+- Press <kbd>Meta</kbd> + <kbd>T</kbd> to open the tile editor on the current screen, and split, resize or remove tiles.
+- Every tile in the layout is a zone. Zones are numbered in the order of the layout, from left to right and top to bottom.
+- The padding between windows is the padding set in the tile editor.
+- Changes are picked up immediately. Windows snapped into a zone follow their tile when it is resized, including windows spanning multiple zones.
 
-<details open>
-  <summary>Simple</summary>
-
-```json
-[
-    {
-        "name": "Layout 1",
-        "padding": 0,
-        "zones": [
-            {
-                "x": 0,
-                "y": 0,
-                "height": 100,
-                "width": 25
-            },
-            {
-                "x": 25,
-                "y": 0,
-                "height": 100,
-                "width": 50
-            },
-            {
-                "x": 75,
-                "y": 0,
-                "height": 100,
-                "width": 25
-            }
-        ]
-    }
-]
-```
-
-</details>
-
-<details>
-  <summary>Advanced</summary>
-
-```json
-[
-    {
-        "name": "Priority Grid",
-        "padding": 0,
-        "zones": [
-            {
-                "x": 0,
-                "y": 0,
-                "height": 100,
-                "width": 25
-            },
-            {
-                "x": 25,
-                "y": 0,
-                "height": 100,
-                "width": 50,
-                "applications": ["firefox"]
-            },
-            {
-                "x": 75,
-                "y": 0,
-                "height": 100,
-                "width": 25
-            }
-        ]
-    },
-    {
-        "name": "Quadrant Grid",
-        "padding": 0,
-        "zones": [
-            {
-                "x": 0,
-                "y": 0,
-                "height": 50,
-                "width": 50
-            },
-            {
-                "x": 0,
-                "y": 50,
-                "height": 50,
-                "width": 50
-            },
-            {
-                "x": 50,
-                "y": 50,
-                "height": 50,
-                "width": 50
-            },
-            {
-                "x": 50,
-                "y": 0,
-                "height": 50,
-                "width": 50
-            }
-        ]
-    },
-    {
-        "name": "Columns",
-        "padding": 0,
-        "zones": [
-            {
-                "x": 0,
-                "y": 0,
-                "height": 100,
-                "width": 25
-            },
-            {
-                "x": 25,
-                "y": 0,
-                "height": 100,
-                "width": 25
-            },
-            {
-                "x": 50,
-                "y": 0,
-                "height": 100,
-                "width": 25
-            },
-            {
-                "x": 75,
-                "y": 0,
-                "height": 100,
-                "width": 25
-            }
-        ]
-    }
-]
-```
-
-</details>
-
-#### Explanation
-
-The main array can contain as many layouts as you want:
-
-Each **layout** object needs the following keys:
-
-- `name`: The name of the layout, shown when cycling between layouts
-- `padding`: The amount of space between the window and the zone in pixels
-- `zones`: An array containing all zone objects for this layout
-
-Each **zone** object can contain the following keys:
-
-- `x`, `y`: position of the top left corner of the zone in screen percentage
-- `width`, `height`: size of the zone in screen percentage
-- `applications`: an array of window classes that should snap to this zone when launched (optional)
-- `indicator`: an object containing the indicator settings (optional)
-  - `position`: default is `center`, other options are `top-left`, `top-center`, `top-right`, `right-center`, `bottom-right`, `bottom-center`, `bottom-left`, `left-center`
-  - `margin`: an object containing the margin for the indicator
-    - `top`, `right`, `bottom`, `left`: margin in pixels
-- `color`: a color name or hex value to tint the zone with (optional)
+A window snapped into a single zone is tiled by KWin itself, so it also works together with the built-in tiling features, like dragging a window into a tile while holding <kbd>Shift</kbd>. Resizing a snapped window works like FancyZones: only that window changes size, the layout itself only changes in the tile editor.
 
 ### Filters
 
@@ -313,18 +201,17 @@ List of all available shortcuts:
 | Move active window to next zone                    | <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>Right</kbd>                 |
 | Switch to previous window in current zone          | <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>Down</kbd>                  |
 | Switch to next window in current zone              | <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>Up</kbd>                    |
-| Cycle layouts                                      | <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>D</kbd>                     |
-| Cycle layouts (reversed)                           | <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>D</kbd>  |
 | Toggle zone overlay                                | <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>C</kbd>                     |
-| Activate layout                                    | <kbd>Meta</kbd> + <kbd>Num 0-9</kbd>                                |
+| Toggle zone spanning                               | <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>V</kbd>                     |
 | Move active window up                              | <kbd>Meta</kbd> + <kbd>Up</kbd>                                     |
 | Move active window down                            | <kbd>Meta</kbd> + <kbd>Down</kbd>                                   |
 | Move active window left                            | <kbd>Meta</kbd> + <kbd>Left</kbd>                                   |
 | Move active window right                           | <kbd>Meta</kbd> + <kbd>Right</kbd>                                  |
 | Snap all windows                                   | <kbd>Meta</kbd> + <kbd>Space</kbd>                                  |
 | Snap active window                                 | <kbd>Meta</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd>               |
+| Restore active window to its pre-zone geometry     | <kbd>Meta</kbd> + <kbd>Backspace</kbd>                              |
 
-*To change the default bindings, go to `System Settings / Shortcuts` and search for KZones*
+*To change the default bindings, go to `System Settings / Shortcuts` and search for FancyKZones*
 
 > [!NOTE]  
 > Not all shortcuts will be bound by default as they conflift with existing system bindings.
@@ -340,7 +227,7 @@ Install the "Geometry change" KWin effect to animate window movements: https://s
 Replace the last part with any shortcut from the list above:
 
 ```sh
-qdbus org.kde.kglobalaccel /component/kwin invokeShortcut "KZones: Cycle layouts"
+qdbus org.kde.kglobalaccel /component/kwin invokeShortcut "FancyKZones: Snap all windows"
 ```
 
 ### Clean corrupted shortcuts
@@ -355,8 +242,12 @@ qdbus org.kde.kglobalaccel /component/kwin org.kde.kglobalaccel.Component.cleanU
 
 ### The script doesn't work
 
-Check if your KDE Plasma version is at 6 or higher (for older versions, check the releases)  
-Make sure there is at least one layout defined in the script settings and that it contains at least one zone.
+Check if your KDE Plasma version is at 6 or higher, FancyKZones does not support Plasma 5 (use the original [KZones for Plasma 5](https://store.kde.org/p/2143914) instead)  
+Make sure the screen has a tiling layout, you can check this by pressing <kbd>Meta</kbd> + <kbd>T</kbd>.
+
+### An update doesn't change anything
+
+KWin keeps the code of a script in memory until KWin itself restarts, disabling and enabling the script again is not enough after updating it. Log out and back in to load the new version.
 
 ### My settings are not saved
 
@@ -368,7 +259,8 @@ This is a known issue with the KWin Scripting API
 If you are using X11 make sure your compositor is enabled, as it is needed to draw transparent windows.  
 You can find this setting in `System Settings / Display and Monitor / Compositor`
 
-### Auto-update broke KZones on Plasma 5
+## Thanks
 
-Due to API changes in KWin 6, the newer versions of the script are not backwards compatible with Plasma 5.  
-If you were already subscribed to KZones using the script manager and updated to the latest version by accident, you will need to uninstall the script and subscribe to [KZones for Plasma 5](https://store.kde.org/p/2143914) instead.
+FancyKZones would not exist without [KZones](https://github.com/gerritdevriese/kzones). A big thank you to [gerritdevriese](https://github.com/gerritdevriese) for creating and maintaining it, and to everyone who contributed to it. Most of what makes this script work, from the zone overlay and selector to the shortcuts and theming, is their work.
+
+If you find FancyKZones useful, please consider [sponsoring gerritdevriese](https://github.com/sponsors/gerritdevriese).

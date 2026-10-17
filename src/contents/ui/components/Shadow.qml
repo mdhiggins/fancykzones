@@ -1,18 +1,22 @@
 import QtQuick
-import Qt5Compat.GraphicalEffects
+import QtQuick.Effects
 
-DropShadow {
-    property Item target : null
+MultiEffect {
+    property Item target: null
+
     anchors.fill: target
-    visible: target.visible
-    opacity: target.opacity
-    scale: target.scale
-    cached: true
-    horizontalOffset: 0
-    verticalOffset: 0
-    radius: 32
-    samples: (radius*2)+1
-    color: '#69000000'
-    smooth: true
+    visible: target ? target.visible : false
+    opacity: target ? target.opacity : 0
+    scale: target ? target.scale : 1
     source: target
+    shadowEnabled: true
+    shadowHorizontalOffset: 0
+    shadowVerticalOffset: 0
+    shadowBlur: 1
+    shadowColor: colorHelper.getShadowColor()
+    autoPaddingEnabled: true
+
+    ColorHelper {
+        id: colorHelper
+    }
 }

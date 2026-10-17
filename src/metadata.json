@@ -2,21 +2,24 @@
     "KPlugin": {
         "Authors": [
             {
+                "Name": "mdhiggins"
+            },
+            {
                 "Name": "gerritdevriese"
             }
         ],
         "Category": "Utilities",
-        "Description": "Utility for snapping windows into zones",
+        "Description": "Utility for snapping windows into zones, with zone spanning, based on KZones",
         "EnabledByDefault": false,
         "Icon": "preferences-desktop-virtual",
-        "Id": "kzones",
+        "Id": "fancykzones",
         "License": "GPL-3.0+",
-        "Name": "KZones",
+        "Name": "FancyKZones",
         "ServiceTypes": [
             "KWin/Script"
         ],
         "Version": "0.9.2",
-        "Website": "https://github.com/gerritdevriese/kzones"
+        "Website": "https://github.com/mdhiggins/FancyKZones"
     },
     "X-KDE-ConfigModule": "kwin/effects/configs/kcm_kwin4_genericscripted",
     "X-Plasma-API": "declarativescript",
@@ -25,5 +28,5 @@
     "X-Plasma-MainScriptX": "code/main.js",
     "X-Plasma-API-Minimum-Version": "6.0",
     "KPackageStructure": "KWin/Script",
-    "X-KDE-PluginKeyword": "kzones"
+    "X-KDE-PluginKeyword": "fancykzones"
 }

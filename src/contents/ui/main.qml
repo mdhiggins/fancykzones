@@ -21,10 +21,11 @@ PlasmaCore.Dialog {
     property bool moved: false
     property bool resizing: false
     property var clientArea: ({})
-    property var cachedClientArea: ({})
     property var displaySize: ({})
-    property int currentLayout: 0
-    property var screenLayouts: ({})
+    property var currentLayout: ({
+            key: "",
+            zones: []
+        })
     property var highlightedZone: []
     property var activeScreen: null
     property var config: ({})
@@ -32,8 +33,15 @@ PlasmaCore.Dialog {
     property var errors: []
     property bool enteredEdge: false
     property bool enableSpanning: false
-    
-    title: "KZones Overlay"
+    // zones the span starts from, the span covers these and the zone under the cursor
+    property var spanAnchor: []
+    property var dwellPoint: null
+    // tile geometries from before a resize, so the layout can be put back afterwards
+    property var layoutSnapshot: []
+    // after a dwell the cursor has to leave the indicator before the next one can start
+    property bool dwellNeedsLeave: false
+
+    title: "FancyKZones Overlay"
     location: PlasmaCore.Types.Desktop
     type: PlasmaCore.Dialog.OnScreenDisplay
     backgroundHints: PlasmaCore.Types.NoBackground
@@ -46,18 +54,6 @@ PlasmaCore.Dialog {
     height: displaySize.height
 
     function loadConfig() {
-
-        const defaultLayouts = '[{"name":"Priority Grid","padding":0,"zones":[{"x":0,"y":0,"height":100,"width":25},{"x":25,"y":0,"height":100,"width":50},{"x":75,"y":0,"height":100,"width":25}]},{"name":"Quadrant Grid","zones":[{"x":0,"y":0,"height":50,"width":50},{"x":0,"y":50,"height":50,"width":50},{"x":50,"y":50,"height":50,"width":50},{"x":50,"y":0,"height":50,"width":50}]}]'
-
-        let layouts;
-
-        try {
-            layouts = JSON.parse(KWin.readConfig("layoutsJson", defaultLayouts));
-        } catch (e) {
-            errors = errors.concat(`Could not load layouts from configuration, using default layouts.\nError: ${e.message}`);
-            layouts = JSON.parse(defaultLayouts);
-        }
-
         // load values from configuration
         config = {
             // enable zone selector
@@ -78,18 +74,18 @@ PlasmaCore.Dialog {
             edgeSnappingTriggerDistance: KWin.readConfig("edgeSnappingTriggerDistance", 1),
             // remember window geometries before snapping to a zone, and restore them when the window is removed from their zone
             rememberWindowGeometries: KWin.readConfig("rememberWindowGeometries", true),
-            // track active layout per screen
-            trackLayoutPerScreen: KWin.readConfig("trackLayoutPerScreen", false),
             // show osd messages
             showOsdMessages: KWin.readConfig("showOsdMessages", true),
             // fade windows while moving
             fadeWindowsWhileMoving: KWin.readConfig("fadeWindowsWhileMoving", false),
             // zone spanning distance in pixels (if 0 span logic is skipped)
             zoneSpanningDistance: KWin.readConfig("zoneSpanningDistance", 0),
+            // hold the cursor still over a zone to start spanning from it
+            enableDwellSpanning: KWin.readConfig("enableDwellSpanning", true),
+            // how long the cursor needs to be held still in milliseconds
+            dwellSpanningDelay: KWin.readConfig("dwellSpanningDelay", 600),
             // auto snap all windows
             autoSnapAllNew: KWin.readConfig("autoSnapAllNew", false),
-            // layouts
-            layouts: layouts,
             // filter mode
             filterMode: KWin.readConfig("filterMode", 0),
             // filter list
@@ -102,7 +98,7 @@ PlasmaCore.Dialog {
             enableDebugOverlay: KWin.readConfig("enableDebugOverlay", false)
         };
 
-        if (config.zoneSpanningDistance > 0) { 
+        if (config.zoneSpanningDistance > 0) {
             config.zoneOverlayHighlightTarget = 1;
         }
 
@@ -110,8 +106,9 @@ PlasmaCore.Dialog {
     }
 
     function log(message) {
-        if (!config.enableDebugLogging) return;
-        console.log("KZones: " + message);
+        if (!config.enableDebugLogging)
+            return;
+        console.log("FancyKZones: " + message);
     }
 
     function show() {
@@ -132,13 +129,197 @@ PlasmaCore.Dialog {
         enableSpanning = false;
         highlightedZone = [];
         showZoneOverlay = config.zoneOverlayShowWhen == 0;
+        spanAnchor = [];
+        dwellNeedsLeave = false;
+        stopDwell();
     }
 
     function refreshClientArea() {
         activeScreen = Workspace.activeScreen;
-        clientArea = Workspace.clientArea(KWin.FullScreenArea, activeScreen, Workspace.currentDesktop);
+        clientArea = Workspace.clientArea(KWin.FullScreenArea, activeScreen, getDesktop(activeScreen));
         displaySize = Workspace.virtualScreenSize;
-        currentLayout = getCurrentLayout();
+        // only replace the layout when it changed, so the overlay is not rebuilt on every poll
+        const layout = getLayout(activeScreen);
+        if (!isSameLayout(layout, currentLayout)) {
+            log("Layout changed to " + layout.key + " with " + layout.zones.length + " zones");
+            currentLayout = layout;
+        }
+    }
+
+    // layouts are the kwin tiling layouts (edited with meta+t), one per screen and virtual desktop
+
+    function getDesktop(output) {
+        // since plasma 6.7 every screen can show a different virtual desktop
+        if (Workspace.currentDesktopForScreen)
+            return Workspace.currentDesktopForScreen(output);
+        return Workspace.currentDesktop;
+    }
+
+    function getRootTile(output, desktop) {
+        if (Workspace.rootTile)
+            return Workspace.rootTile(output, desktop);
+        // plasma < 6.5 has a single tiling layout per screen
+        const tileManager = Workspace.tilingForScreen(output.name);
+        return tileManager ? tileManager.rootTile : null;
+    }
+
+    function getLeafTiles(tile) {
+        if (tile.tiles.length === 0)
+            return [tile];
+        let leaves = [];
+        for (let i = 0; i < tile.tiles.length; i++) {
+            leaves = leaves.concat(getLeafTiles(tile.tiles[i]));
+        }
+        return leaves;
+    }
+
+    function getLayout(output) {
+        if (!output)
+            return {
+                key: "",
+                zones: []
+            };
+        const desktop = getDesktop(output);
+        const rootTile = getRootTile(output, desktop);
+        const screenArea = Workspace.clientArea(KWin.FullScreenArea, output, desktop);
+        const zones = [];
+        if (rootTile) {
+            getLeafTiles(rootTile).forEach(tile => {
+                // the tiles editor can leave collapsed tiles behind
+                if (tile.relativeGeometry.width <= 0 || tile.relativeGeometry.height <= 0)
+                    return;
+                zones.push(createZone(tile, screenArea));
+            });
+        }
+        return {
+            key: output.name + "|" + desktop.id,
+            zones: zones
+        };
+    }
+
+    function createZone(tile, screenArea) {
+        const rel = tile.relativeGeometry;
+        const abs = tile.absoluteGeometry;
+        const padding = tile.padding;
+        // same as Tile::windowGeometry() in kwin: half padding between tiles, full padding against the screen edges
+        const left = Math.max(abs.x, screenArea.x) + (rel.x > 0 ? padding / 2 : padding);
+        const top = Math.max(abs.y, screenArea.y) + (rel.y > 0 ? padding / 2 : padding);
+        const right = Math.min(abs.x + abs.width, screenArea.x + screenArea.width) - (rel.x + rel.width < 1 ? padding / 2 : padding);
+        const bottom = Math.min(abs.y + abs.height, screenArea.y + screenArea.height) - (rel.y + rel.height < 1 ? padding / 2 : padding);
+        return {
+            tile: tile,
+            // position and size in percentage of the screen, used by the indicators and the neighbour lookup
+            x: rel.x * 100,
+            y: rel.y * 100,
+            width: rel.width * 100,
+            height: rel.height * 100,
+            padding: padding,
+            // tile area without padding
+            area: {
+                x: abs.x,
+                y: abs.y,
+                width: abs.width,
+                height: abs.height
+            },
+            // geometry a window gets in this zone
+            rect: {
+                x: left,
+                y: top,
+                width: right - left,
+                height: bottom - top
+            }
+        };
+    }
+
+    function isSameRect(a, b) {
+        return Math.abs(a.x - b.x) <= 1 && Math.abs(a.y - b.y) <= 1 && Math.abs(a.width - b.width) <= 1 && Math.abs(a.height - b.height) <= 1;
+    }
+
+    function isSameLayout(a, b) {
+        if (a.key !== b.key || a.zones.length !== b.zones.length)
+            return false;
+        return a.zones.every((zone, i) => zone.tile === b.zones[i].tile && isSameRect(zone.rect, b.zones[i].rect));
+    }
+
+    function isCustomTile(tile) {
+        // quick tiles (half/quarter screen) have no layout direction, only tiles from the tiling layout do
+        return !!tile && tile.layoutDirection !== undefined;
+    }
+
+    function manageClient(tile, client) {
+        if (tile.manage)
+            return tile.manage(client);
+        // plasma < 6.5 tiles windows by assigning the tile
+        client.tile = tile;
+        return client.tile === tile;
+    }
+
+    function unmanageClient(client) {
+        if (client.tile.unmanage)
+            client.tile.unmanage(client);
+        else
+            client.tile = null;
+    }
+
+    function getClientZoneTiles(client) {
+        // windows in a single zone are managed by kwin, spanned windows are tracked by us
+        if (isCustomTile(client.tile))
+            return [client.tile];
+        return client.zoneTiles || [];
+    }
+
+    function getClientZone(client, layout) {
+        const zone = getClientZoneTiles(client).map(tile => layout.zones.findIndex(candidate => candidate.tile === tile));
+        // tiles from another screen, desktop or a removed tile
+        if (zone.includes(-1))
+            return [];
+        return zone.sort((a, b) => a - b);
+    }
+
+    function getZoneGeometry(zones) {
+        let minX = Infinity;
+        let minY = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
+        zones.forEach(zone => {
+            minX = Math.min(minX, zone.rect.x);
+            minY = Math.min(minY, zone.rect.y);
+            maxX = Math.max(maxX, zone.rect.x + zone.rect.width);
+            maxY = Math.max(maxY, zone.rect.y + zone.rect.height);
+        });
+        return Qt.rect(Math.round(minX), Math.round(minY), Math.round(maxX - minX), Math.round(maxY - minY));
+    }
+
+    function setZoneTiles(client, tiles) {
+        // stop following the previous tiles
+        if (client.followZoneTiles) {
+            (client.zoneTiles || []).forEach(tile => {
+                try {
+                    tile.windowGeometryChanged.disconnect(client.followZoneTiles);
+                } catch (e) {
+                    // tile was already removed
+                }
+            });
+            client.followZoneTiles = null;
+        }
+        client.zoneTiles = tiles;
+        if (tiles.length === 0)
+            return;
+
+        // kwin only moves the windows it manages, so follow the tiles when the layout is edited
+        client.followZoneTiles = () => {
+            if (client.move || client.resize || isCustomTile(client.tile))
+                return;
+            if (client.zoneTiles.some(tile => !tile.relativeGeometry))
+                return;
+            const screenArea = Workspace.clientArea(KWin.FullScreenArea, client.output, getDesktop(client.output));
+            const newGeometry = getZoneGeometry(client.zoneTiles.map(tile => createZone(tile, screenArea)));
+            if (!isSameRect(newGeometry, client.frameGeometry)) {
+                log("Following tiles for client " + client.resourceClass.toString() + " with geometry " + JSON.stringify(newGeometry));
+                client.frameGeometry = newGeometry;
+            }
+        };
+        tiles.forEach(tile => tile.windowGeometryChanged.connect(client.followZoneTiles));
     }
 
     function isPointInside(x, y, geometry) {
@@ -146,6 +327,8 @@ PlasmaCore.Dialog {
     }
 
     function isHovering(item) {
+        if (!item)
+            return false;
         const itemGlobal = item.mapToGlobal(Qt.point(0, 0));
         return isPointInside(Workspace.cursorPos.x, Workspace.cursorPos.y, {
             x: itemGlobal.x,
@@ -156,11 +339,14 @@ PlasmaCore.Dialog {
     }
 
     function checkFilter(client) {
-
-        if (!client) return false;
-        if (!client.normalWindow) return false;
-        if (client.popupWindow) return false;
-        if (client.skipTaskbar) return false;
+        if (!client)
+            return false;
+        if (!client.normalWindow)
+            return false;
+        if (client.popupWindow)
+            return false;
+        if (client.skipTaskbar)
+            return false;
 
         const filter = config.filterList.split(/\r?\n/);
         if (config.filterList.length > 0) {
@@ -177,44 +363,38 @@ PlasmaCore.Dialog {
     }
 
     function matchZone(client) {
+        // kwin already knows which tile the window is in
+        if (isCustomTile(client.tile))
+            return;
 
-        refreshClientArea();
-
-        client.zone = [];
-        // get all zones in the current layout
-        const zones = config.layouts[currentLayout].zones;
+        const layout = getLayout(client.output);
         // loop through zones and compare with the geometries of the client
-        for (let i = 0; i < zones.length; i++) {
-            const zone = zones[i];
-            const zonePadding = config.layouts[currentLayout].padding || 0;
-            const zoneX = ((zone.x / 100) * (clientArea.width - zonePadding)) + zonePadding;
-            const zoneY = ((zone.y / 100) * (clientArea.height - zonePadding)) + zonePadding;
-            const zoneWidth = ((zone.width / 100) * (clientArea.width - zonePadding)) - zonePadding;
-            const zoneHeight = ((zone.height / 100) * (clientArea.height - zonePadding)) - zonePadding;
-            if (client.frameGeometry.x == zoneX && client.frameGeometry.y == zoneY && client.frameGeometry.width == zoneWidth && client.frameGeometry.height == zoneHeight) {
-                // zone found, set it and exit the loop
-                client.zone = [i];
-                client.layout = currentLayout;
-                break;
-            }
-        }
+        const zone = layout.zones.find(zone => isSameRect(zone.rect, client.frameGeometry));
+        setZoneTiles(client, zone ? [zone.tile] : []);
     }
 
-    function getWindowsInZone(zone, layout) {
+    function getWindowsInZone(tile) {
         const windows = [];
+        const activeWindow = Workspace.activeWindow;
         for (let i = 0; i < Workspace.stackingOrder.length; i++) {
             const client = Workspace.stackingOrder[i];
-            if (client.zone.includes(zone) && client.layout === layout && client.desktop === Workspace.currentDesktop && client.activity === Workspace.currentActivity && client.screen === Workspace.activeWindow.screen && checkFilter(client)) {
-                windows.push(client);
-            }
+            if (!checkFilter(client) || !getClientZoneTiles(client).includes(tile))
+                continue;
+            if (client.output !== activeWindow.output)
+                continue;
+            if (!client.onAllDesktops && !client.desktops.includes(getDesktop(client.output)))
+                continue;
+            if (client.activities.length > 0 && !client.activities.includes(Workspace.currentActivity))
+                continue;
+            windows.push(client);
         }
         return windows;
     }
 
-    function switchWindowInZone(zone, layout, reverse) {
-        const clientsInZone = getWindowsInZone(zone, layout);
-        if (reverse) clientsInZone.reverse();
-
+    function switchWindowInZone(tile, reverse) {
+        const clientsInZone = getWindowsInZone(tile);
+        if (reverse)
+            clientsInZone.reverse();
 
         // cycle through clients in zone
         if (clientsInZone.length > 0) {
@@ -227,38 +407,59 @@ PlasmaCore.Dialog {
         }
     }
 
-    function moveClientToZone(client, zone) {
+    function moveClientToZone(client, zone, layout) {
         // block abnormal windows from being moved (like plasmashell, docks, etc...)
-        if (!checkFilter(client)) return;
+        if (!checkFilter(client))
+            return;
+
+        refreshClientArea();
+        if (!layout)
+            layout = getLayout(client.output);
+
+        const zones = zone.map(zoneIndex => layout.zones[zoneIndex]).filter(zone => zone !== undefined);
 
         log("Moving client " + client.resourceClass.toString() + " to zone " + JSON.stringify(zone));
 
-        refreshClientArea()
-        saveClientProperties(client, zone);
+        saveClientGeometry(client, zones);
 
-        // move client to zone
-        if (zone.length > 0) {
-            const currentZones = repeaterLayout.itemAt(currentLayout)
-            let minX = Infinity;
-            let minY = Infinity;
-            let maxX = -Infinity;
-            let maxY = -Infinity;
-            zone.forEach((zoneIndex) => {
-                const zoneItem = currentZones.repeater.itemAt(zoneIndex);
-                const itemGlobal = zoneItem.mapToGlobal(Qt.point(0, 0));
-                minX = Math.min(minX, itemGlobal.x);
-                minY = Math.min(minY, itemGlobal.y);
-                maxX = Math.max(maxX, itemGlobal.x + zoneItem.width);
-                maxY = Math.max(maxY, itemGlobal.y + zoneItem.height);
-            });
-            const newGeometry = Qt.rect(Math.round(minX), Math.round(minY), Math.round(maxX - minX), Math.round(maxY - minY));
-            log("Moving client " + client.resourceClass.toString() + " to zones " + JSON.stringify(zone) + " with geometry " + JSON.stringify(newGeometry));
-            client.setMaximize(false, false);
-            client.frameGeometry = newGeometry;
+        if (zones.length === 0) {
+            setZoneTiles(client, []);
+            return;
+        }
+
+        // a single zone is a kwin tile, let kwin manage the window so it follows the tile when the layout is edited
+        if (zones.length === 1 && manageClient(zones[0].tile, client)) {
+            log("Client " + client.resourceClass.toString() + " is managed by tile " + zone[0]);
+            setZoneTiles(client, []);
+            return;
+        }
+
+        // spanned zones are not a single tile, so the window is placed by us
+        if (client.tile)
+            unmanageClient(client);
+        setZoneTiles(client, zones.map(zone => zone.tile));
+        const newGeometry = getZoneGeometry(zones);
+        log("Moving client " + client.resourceClass.toString() + " to zones " + JSON.stringify(zone) + " with geometry " + JSON.stringify(newGeometry));
+        client.setMaximize(false, false);
+        client.frameGeometry = newGeometry;
+    }
+
+    function restoreClientGeometry(client) {
+        if (!checkFilter(client) || getClientZoneTiles(client).length === 0)
+            return;
+
+        log("Restoring geometry for client " + client.resourceClass.toString());
+        // kwin restores the geometry from before tiling when the window leaves its tile
+        if (isCustomTile(client.tile))
+            unmanageClient(client);
+        setZoneTiles(client, []);
+        if (config.rememberWindowGeometries && client.oldGeometry) {
+            const geometry = client.oldGeometry;
+            client.frameGeometry = Qt.rect(geometry.x, geometry.y, geometry.width, geometry.height);
         }
     }
 
-    function saveClientProperties(client, zone) {
+    function saveClientGeometry(client, zones) {
         log("Saving geometry for client " + client.resourceClass.toString());
 
         // save current geometry
@@ -269,22 +470,32 @@ PlasmaCore.Dialog {
                 "width": client.frameGeometry.width,
                 "height": client.frameGeometry.height
             };
-            if (zone.length > 0) {
-                if (client.zone.length === 0) {
+            if (zones.length > 0) {
+                if (getClientZoneTiles(client).length === 0) {
                     client.oldGeometry = geometry;
                 }
             }
         }
+    }
 
-        // save zone
-        client.zone = zone;
-        client.layout = currentLayout;
-        client.desktop = Workspace.currentDesktop;
-        client.activity = Workspace.currentActivity;
+    function findClosestZone(zones, point, getCenter) {
+        let closestZone = null;
+        let closestDistance = Infinity;
+
+        for (let i = 0; i < zones.length; i++) {
+            const zoneCenter = getCenter(zones[i]);
+            const distance = Math.sqrt(Math.pow(point.x - zoneCenter.x, 2) + Math.pow(point.y - zoneCenter.y, 2));
+            if (distance < closestDistance) {
+                closestZone = i;
+                closestDistance = distance;
+            }
+        }
+        return closestZone;
     }
 
     function moveClientToClosestZone(client) {
-        if (!checkFilter(client)) return null;
+        if (!checkFilter(client))
+            return null;
 
         log("Moving client " + client.resourceClass.toString() + " to closest zone");
 
@@ -295,94 +506,17 @@ PlasmaCore.Dialog {
             y: client.frameGeometry.y + (client.frameGeometry.height / 2)
         };
 
-        const zones = config.layouts[currentLayout].zones;
-        let closestZone = null;
-        let closestDistance = Infinity;
+        const layout = getLayout(client.output);
+        const closestZone = findClosestZone(layout.zones, centerPointOfClient, zone => ({
+                    x: zone.rect.x + zone.rect.width / 2,
+                    y: zone.rect.y + zone.rect.height / 2
+                }));
+        if (closestZone === null)
+            return null;
 
-        for (let i = 0; i < zones.length; i++) {
-            const zone = zones[i];
-            const zoneCenter = {
-                x: (zone.x + zone.width / 2) / 100 * clientArea.width + clientArea.x,
-                y: (zone.y + zone.height / 2) / 100 * clientArea.height + clientArea.y
-            };
-            const distance = Math.sqrt(Math.pow(centerPointOfClient.x - zoneCenter.x, 2) + Math.pow(centerPointOfClient.y - zoneCenter.y, 2));
-            if (distance < closestDistance) {
-                closestZone = i;
-                closestDistance = distance;
-            }
-        }
-
-        if ((!client.zone.includes(closestZone)) || client.layout !== currentLayout) moveClientToZone(client, [closestZone]);
+        if (!getClientZone(client, layout).includes(closestZone))
+            moveClientToZone(client, [closestZone], layout);
         return closestZone;
-    }
-
-    function findClientSpecularZone(client, isVerticalAxis=false) {
-        if (!checkFilter(client)) return null;
-        refreshClientArea();
-        const centerPointOfClient = {
-            x: client.frameGeometry.x + (client.frameGeometry.width / 2),
-            y: client.frameGeometry.y + (client.frameGeometry.height / 2)
-        };
-        const zones = config.layouts[currentLayout].zones;
-        let currentZoneIndex = null;
-        let closestDistance = Infinity;
-
-        for (let i = 0; i < zones.length; i++) {
-            const zone = zones[i];
-            let zoneCenter = {
-                x: (zone.x + zone.width / 2) / 100 * clientArea.width + clientArea.x,
-                y: (zone.y + zone.height / 2) / 100 * clientArea.height + clientArea.y
-            };
-            const distance = Math.sqrt(
-                Math.pow(centerPointOfClient.x - zoneCenter.x, 2) +
-                Math.pow(centerPointOfClient.y - zoneCenter.y, 2)
-            );
-            if (distance < closestDistance) {
-                currentZoneIndex = i;
-                closestDistance = distance;
-            }
-        }
-        if (currentZoneIndex === null) return null;
-        const currentZone = zones[currentZoneIndex];
-        const currentZoneCenter = {
-            x: currentZone.x + currentZone.width / 2,
-            y: currentZone.y + currentZone.height / 2
-        };
-        let specularZoneIndex = null;
-        let minDistance = Infinity;
-
-        for (let i = 0; i < zones.length; i++) {
-            if (i === currentZoneIndex) continue;
-
-            const zone = zones[i];
-            const zoneCenter = {
-                x: zone.x + zone.width / 2,
-                y: zone.y + zone.height / 2
-            };
-            let isSpecular = false;
-            if (isVerticalAxis) {
-                isSpecular = Math.abs(zoneCenter.x - currentZoneCenter.x) < 5 &&
-                    Math.abs((zoneCenter.y - 50) - (50 - currentZoneCenter.y)) < 5;
-            } else {
-                isSpecular = Math.abs(zoneCenter.y - currentZoneCenter.y) < 5 &&
-                    Math.abs((zoneCenter.x - 50) - (50 - currentZoneCenter.x)) < 5;
-            }
-            if (isSpecular) {
-                const specularPoint = {
-                    x: !isVerticalAxis ? (100 - currentZoneCenter.x) : currentZoneCenter.x,
-                    y: isVerticalAxis ? (100 - currentZoneCenter.y) : currentZoneCenter.y
-                };
-                const distance = Math.sqrt(
-                    Math.pow(zoneCenter.x - specularPoint.x, 2) +
-                    Math.pow(zoneCenter.y - specularPoint.y, 2)
-                );
-                if (distance < minDistance) {
-                    specularZoneIndex = i;
-                    minDistance = distance;
-                }
-            }
-        }
-        return specularZoneIndex !== null ? specularZoneIndex : currentZoneIndex;
     }
 
     function moveAllClientsToClosestZone() {
@@ -390,72 +524,70 @@ PlasmaCore.Dialog {
         let count = 0;
         for (let i = 0; i < Workspace.stackingOrder.length; i++) {
             const client = Workspace.stackingOrder[i];
-            if (client.move) continue;
-            moveClientToClosestZone(client) && count++;
+            if (client.move)
+                continue;
+            moveClientToClosestZone(client) !== null && count++;
         }
         log("Moved " + count + " clients to closest zone");
         return count;
     }
 
     function moveClientToNeighbour(client, direction) {
-        if (!checkFilter(client)) return null;
+        if (!checkFilter(client))
+            return null;
 
         log("Moving client " + client.resourceClass.toString() + " to neighbour " + direction);
 
         refreshClientArea();
 
-        const zones = config.layouts[currentLayout].zones;
+        const layout = getLayout(client.output);
+        const zones = layout.zones;
+        const clientZone = getClientZone(client, layout);
 
-        if (client.zone.length === 0 || client.layout !== currentLayout) {
+        if (clientZone.length === 0) {
             moveClientToClosestZone(client);
-            return client.zone;
-        };
-        const primaryZone = (client.zone.length > 0) ? client.zone[0] : -1;
-        const currentZone = zones[primaryZone];
+            return getClientZone(client, layout);
+        }
+        const currentZone = zones[clientZone[0]];
         let targetZoneIndex = -1;
 
         let minDistance = Infinity;
+        // tile edges are floating point percentages
+        const epsilon = 0.5;
 
         for (let i = 0; i < zones.length; i++) {
-            if (client.zone.includes(i)) continue;
+            if (clientZone.includes(i))
+                continue;
 
             const zone = zones[i];
             let isNeighbour = false;
             let distance = Infinity;
 
             switch (direction) {
-                case "left":
-                    if (zone.x + zone.width <= currentZone.x &&
-                        zone.y < currentZone.y + currentZone.height &&
-                        zone.y + zone.height > currentZone.y) {
-                        isNeighbour = true;
-                        distance = currentZone.x - (zone.x + zone.width);
-                    }
-                    break;
-                case "right":
-                    if (zone.x >= currentZone.x + currentZone.width &&
-                        zone.y < currentZone.y + currentZone.height &&
-                        zone.y + zone.height > currentZone.y) {
-                        isNeighbour = true;
-                        distance = zone.x - (currentZone.x + currentZone.width);
-                    }
-                    break;
-                case "up":
-                    if (zone.y + zone.height <= currentZone.y &&
-                        zone.x < currentZone.x + currentZone.width &&
-                        zone.x + zone.width > currentZone.x) {
-                        isNeighbour = true;
-                        distance = currentZone.y - (zone.y + zone.height);
-                    }
-                    break;
-                case "down":
-                    if (zone.y >= currentZone.y + currentZone.height &&
-                        zone.x < currentZone.x + currentZone.width &&
-                        zone.x + zone.width > currentZone.x) {
-                        isNeighbour = true;
-                        distance = zone.y - (currentZone.y + currentZone.height);
-                    }
-                    break;
+            case "left":
+                if (zone.x + zone.width <= currentZone.x + epsilon && zone.y < currentZone.y + currentZone.height - epsilon && zone.y + zone.height > currentZone.y + epsilon) {
+                    isNeighbour = true;
+                    distance = currentZone.x - (zone.x + zone.width);
+                }
+                break;
+            case "right":
+                if (zone.x >= currentZone.x + currentZone.width - epsilon && zone.y < currentZone.y + currentZone.height - epsilon && zone.y + zone.height > currentZone.y + epsilon) {
+                    isNeighbour = true;
+                    distance = zone.x - (currentZone.x + currentZone.width);
+                }
+                break;
+            case "up":
+                if (zone.y + zone.height <= currentZone.y + epsilon && zone.x < currentZone.x + currentZone.width - epsilon && zone.x + zone.width > currentZone.x + epsilon) {
+                    isNeighbour = true;
+                    distance = currentZone.y - (zone.y + zone.height);
+                }
+                break;
+            case "down":
+                if (zone.y >= currentZone.y + currentZone.height - epsilon && zone.x < currentZone.x + currentZone.width - epsilon && zone.x + zone.width > currentZone.x + epsilon) {
+                    isNeighbour = true;
+                    distance = zone.y - (currentZone.y + currentZone.height);
+                }
+                break;
             }
 
             if (isNeighbour && distance < minDistance) {
@@ -464,8 +596,8 @@ PlasmaCore.Dialog {
             }
         }
         if (targetZoneIndex !== -1) {
-            moveClientToZone(client, [targetZoneIndex]);
-        } else if(!config.trackLayoutPerScreen) {
+            moveClientToZone(client, [targetZoneIndex], layout);
+        } else {
             const toScreenMap = {
                 left: "slotWindowToPrevScreen",
                 right: "slotWindowToNextScreen",
@@ -473,30 +605,27 @@ PlasmaCore.Dialog {
                 down: "slotWindowToBelowScreen"
             };
             if (Workspace[toScreenMap[direction]]) {
+                // enter the next screen in the zone mirroring the current one, screens can have different layouts
                 const isVerticalAxis = direction === "up" || direction === "down";
-                const specularZone = findClientSpecularZone(client, isVerticalAxis);
+                const currentZoneCenter = {
+                    x: currentZone.x + currentZone.width / 2,
+                    y: currentZone.y + currentZone.height / 2
+                };
+                const specularPoint = {
+                    x: !isVerticalAxis ? (100 - currentZoneCenter.x) : currentZoneCenter.x,
+                    y: isVerticalAxis ? (100 - currentZoneCenter.y) : currentZoneCenter.y
+                };
                 Workspace[toScreenMap[direction]]();
-                moveClientToZone(client, [specularZone]);
+                const targetLayout = getLayout(client.output);
+                const specularZone = findClosestZone(targetLayout.zones, specularPoint, zone => ({
+                            x: zone.x + zone.width / 2,
+                            y: zone.y + zone.height / 2
+                        }));
+                if (specularZone !== null)
+                    moveClientToZone(client, [specularZone], targetLayout);
             }
         }
         return targetZoneIndex;
-    }
-
-    function getCurrentLayout() {
-        if (config.trackLayoutPerScreen) {
-            const screenLayout = screenLayouts[Workspace.activeScreen.name]
-            if (!screenLayout) {
-                screenLayouts[Workspace.activeScreen.name] = 0
-            }
-            return screenLayouts[Workspace.activeScreen.name];
-        } else {
-            return currentLayout;
-        }
-    }
-
-    function setCurrentLayout(layout) {
-        if (config.trackLayoutPerScreen) screenLayouts[Workspace.activeScreen.name] = layout
-        currentLayout = layout
     }
 
     function toggleZoneOverlay() {
@@ -507,6 +636,7 @@ PlasmaCore.Dialog {
             if (!showZoneOverlay) {
                 highlightedZone = [];
                 enableSpanning = false;
+                spanAnchor = [];
             }
         } else {
             osdDbus.exec("The overlay can only be shown while moving a window");
@@ -519,17 +649,150 @@ PlasmaCore.Dialog {
         }
         if (moving) {
             enableSpanning = !enableSpanning;
+            spanAnchor = enableSpanning ? highlightedZone.slice() : [];
+            dwellNeedsLeave = true;
         } else {
             osdDbus.exec("The overlay can only be shown while moving a window");
         }
     }
 
-    function connectSignals(client) {
+    function getSpanZones(zones, zoneIndices) {
+        // like fancyzones, span the smallest rectangle of zones covering the given zones
+        const boundingBox = indices => getZoneGeometry(indices.map(zoneIndex => ({
+                        rect: zones[zoneIndex].area
+                    })));
+        const overlaps = (a, b) => Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x) > 1 && Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y) > 1;
+        let box = boundingBox(zoneIndices);
+        let span = [];
+        // zones that stick out of the box grow it, repeat until it stops growing
+        while (true) {
+            span = zones.map((zone, zoneIndex) => zoneIndex).filter(zoneIndex => overlaps(zones[zoneIndex].area, box));
+            const grown = boundingBox(span);
+            if (isSameRect(grown, box))
+                break;
+            box = grown;
+        }
+        return span;
+    }
 
-        if (!checkFilter(client)) return;
+    function isHoveringZoneIndicator() {
+        // only the indicators start a dwell, so passing over a zone does not
+        if (zoneSelector.expanded) {
+            return highlightedZone.some(zoneIndex => isHovering(zoneSelector.repeater.itemAt(zoneIndex)));
+        }
+        if (!config.enableZoneOverlay || !showZoneOverlay)
+            return false;
+        return highlightedZone.some(zoneIndex => {
+            const zoneItem = zoneOverlay.repeater.itemAt(zoneIndex);
+            return zoneItem && isHovering(zoneItem.children[0]);
+        });
+    }
+
+    function canDwell() {
+        return config.enableDwellSpanning && moving && shown && !dwellNeedsLeave && highlightedZone.length > 0 && isHoveringZoneIndicator();
+    }
+
+    function updateDwell() {
+        if (dwellNeedsLeave && !isHoveringZoneIndicator())
+            dwellNeedsLeave = false;
+        if (!canDwell()) {
+            stopDwell();
+            return;
+        }
+        // small movements while holding still are allowed, while spanning the dwell turns it off again
+        const cursorPos = Workspace.cursorPos;
+        if (!dwellPoint || Math.abs(cursorPos.x - dwellPoint.x) > 8 || Math.abs(cursorPos.y - dwellPoint.y) > 8 || dwellIndicator.reversed !== enableSpanning) {
+            dwellPoint = {
+                x: cursorPos.x,
+                y: cursorPos.y
+            };
+            dwellIndicator.restart(enableSpanning);
+        }
+    }
+
+    function stopDwell() {
+        dwellPoint = null;
+        dwellIndicator.stop();
+    }
+
+    function finishDwell() {
+        if (!canDwell())
+            return;
+        if (enableSpanning) {
+            log("Dwell finished, spanning stopped");
+            enableSpanning = false;
+            spanAnchor = [];
+        } else {
+            log("Dwell finished, spanning from zones " + highlightedZone);
+            if (!showZoneOverlay)
+                toggleZoneOverlay();
+            enableSpanning = true;
+            spanAnchor = highlightedZone.slice();
+        }
+        dwellNeedsLeave = true;
+        stopDwell();
+    }
+
+    function snapshotLayout(tile) {
+        let rootTile = tile;
+        while (rootTile.parent)
+            rootTile = rootTile.parent;
+        const snapshot = [];
+        const visit = t => {
+            const g = t.relativeGeometry;
+            snapshot.push({
+                tile: t,
+                geometry: Qt.rect(g.x, g.y, g.width, g.height)
+            });
+            t.tiles.forEach(visit);
+        };
+        visit(rootTile);
+        return snapshot;
+    }
+
+    function restoreLayout(snapshot) {
+        // neighbouring tiles adjust each other, so a second pass settles any edge the first one moved
+        for (let pass = 0; pass < 2; pass++) {
+            snapshot.forEach(entry => {
+                const g = entry.tile.relativeGeometry;
+                // relative geometry is a fraction of the screen
+                if (!g || (Math.abs(g.x - entry.geometry.x) < 1e-6 && Math.abs(g.y - entry.geometry.y) < 1e-6 && Math.abs(g.width - entry.geometry.width) < 1e-6 && Math.abs(g.height - entry.geometry.height) < 1e-6))
+                    return;
+                log("Restoring tile geometry " + JSON.stringify(entry.geometry));
+                entry.tile.relativeGeometry = entry.geometry;
+            });
+        }
+    }
+
+    function disconnectSignals(client) {
+        const handlers = client.fancyKZonesHandlers;
+        if (!handlers)
+            return;
+        try {
+            client.onInteractiveMoveResizeStarted.disconnect(handlers.started);
+            client.onInteractiveMoveResizeStepped.disconnect(handlers.stepped);
+            client.onInteractiveMoveResizeFinished.disconnect(handlers.finished);
+            client.onFullScreenChanged.disconnect(handlers.fullScreen);
+        } catch (e) {
+            // already disconnected
+        }
+        client.fancyKZonesHandlers = null;
+    }
+
+    function connectSignals(client) {
+        if (!checkFilter(client))
+            return;
 
         log("Connecting signals for client " + client.resourceClass.toString());
 
+        // kwin shares one qml engine between scripts, so handlers from a previous load are still connected
+        disconnectSignals(client);
+        client.fancyKZonesHandlers = {
+            started: onInteractiveMoveResizeStarted,
+            stepped: onInteractiveMoveResizeStepped,
+            finished: onInteractiveMoveResizeFinished,
+            fullScreen: onFullScreenChanged
+        };
         client.onInteractiveMoveResizeStarted.connect(onInteractiveMoveResizeStarted);
         client.onInteractiveMoveResizeStepped.connect(onInteractiveMoveResizeStepped);
         client.onInteractiveMoveResizeFinished.connect(onInteractiveMoveResizeFinished);
@@ -539,26 +802,33 @@ PlasmaCore.Dialog {
             log("Interactive move/resize started for client " + client.resourceClass.toString());
             if (client.resizeable && checkFilter(client)) {
                 if (client.move && checkFilter(client)) {
-                    cachedClientArea = clientArea;
-
                     if (config.fadeWindowsWhileMoving) {
                         for (let i = 0; i < Workspace.stackingOrder.length; i++) {
                             const client = Workspace.stackingOrder[i];
                             client.previousOpacity = client.opacity;
-                            if (client.move ||!client.normalWindow) continue;
+                            if (client.move || !client.normalWindow)
+                                continue;
                             client.opacity = 0.5;
                         }
                     }
 
-                    if (config.rememberWindowGeometries && client.zone.length > 0) {
-                        if (client.oldGeometry) {
+                    const zoneTiles = getClientZoneTiles(client);
+                    if (zoneTiles.length > 0) {
+                        const frameGeometry = Qt.rect(client.frameGeometry.x, client.frameGeometry.y, client.frameGeometry.width, client.frameGeometry.height);
+                        const managed = isCustomTile(client.tile);
+                        // take the window out of its tile, the drop decides where it goes next
+                        if (managed) {
+                            unmanageClient(client);
+                            setZoneTiles(client, zoneTiles);
+                        }
+
+                        if (config.rememberWindowGeometries && client.oldGeometry) {
                             const geometry = client.oldGeometry;
-                            const primaryZone = (client.zone.length > 0) ? client.zone[0] : -1;
-                            const zone = config.layouts[client.layout].zones[primaryZone];
-                            const zoneCenterX = (zone.x + zone.width / 2) / 100 * cachedClientArea.width + cachedClientArea.x;
-                            const zoneX = ((zone.x / 100) * cachedClientArea.width + cachedClientArea.x);
-                            const newGeometry = Qt.rect(Math.round(Workspace.cursorPos.x - geometry.width / 2), Math.round(client.frameGeometry.y), Math.round(geometry.width), Math.round(geometry.height));
+                            const newGeometry = Qt.rect(Math.round(Workspace.cursorPos.x - geometry.width / 2), Math.round(frameGeometry.y), Math.round(geometry.width), Math.round(geometry.height));
                             client.frameGeometry = newGeometry;
+                        } else if (managed && !config.rememberWindowGeometries) {
+                            // kwin restores the geometry from before tiling, keep the zone size instead
+                            client.frameGeometry = frameGeometry;
                         }
                     }
 
@@ -569,6 +839,16 @@ PlasmaCore.Dialog {
                     mainDialog.show();
                 }
                 if (client.resize) {
+                    // resizing a tiled window moves the tile edges for every window, only resize the window itself like fancyzones
+                    if (isCustomTile(client.tile)) {
+                        const tile = client.tile;
+                        const frameGeometry = Qt.rect(client.frameGeometry.x, client.frameGeometry.y, client.frameGeometry.width, client.frameGeometry.height);
+                        layoutSnapshot = snapshotLayout(tile);
+                        unmanageClient(client);
+                        // kwin restores the geometry from before tiling, keep the zone size instead
+                        client.frameGeometry = frameGeometry;
+                        setZoneTiles(client, [tile]);
+                    }
                     moving = false;
                     moved = false;
                     resizing = true;
@@ -598,47 +878,31 @@ PlasmaCore.Dialog {
                 log("Move end " + client.resourceClass.toString());
                 if (moved) {
                     if (shown) {
-                        moveClientToZone(client, highlightedZone);
+                        moveClientToZone(client, highlightedZone, currentLayout);
                     } else {
-                        saveClientProperties(client, []);
+                        setZoneTiles(client, []);
                     }
                 }
                 hide();
             } else if (resizing) {
+                // kwin may still have moved tile edges before the window left its tile
+                restoreLayout(layoutSnapshot);
+                layoutSnapshot = [];
                 matchZone(client);
-                log("Resizing end: Matched client " + client.resourceClass.toString() + " to layout.zone " + client.layout + " " + client.zone );
-                saveClientProperties(client, client.zone);
+                // still exactly in its zone, for example when the resize was cancelled, so hand it back to kwin
+                if (!isCustomTile(client.tile) && client.zoneTiles.length === 1 && manageClient(client.zoneTiles[0], client))
+                    setZoneTiles(client, []);
+                log("Resizing end: Matched client " + client.resourceClass.toString() + " to zone " + getClientZone(client, getLayout(client.output)));
             }
             moving = false;
             moved = false;
             resizing = false;
         }
 
-        // fix from https://github.com/gerritdevriese/kzones/pull/25
         function onFullScreenChanged() {
             log("Client fullscreen: " + client.resourceClass.toString() + " (fullscreen " + client.fullScreen + ")");
-                if (client.fullScreen == true) {
-                log("onFullscreenChanged: Client zone: " + client.zone + " layout: " + client.layout);
-                if (client.zone.length > 0 && client.layout != -1) {
-                    //check if fullscreen is enabled for layout or for zone
-                    const layout = config.layouts[client.layout];
-                    const primaryZone = (client.zone.length > 0) ? client.zone[0] : -1;
-                    const zone = layout.zones[primaryZone];
-                    log("Layout.fullscreen: " + layout.fullscreen + " Zone.fullscreen: " + zone.fullscreen);
-                    if(layout.fullscreen == true || zone.fullscreen == true) {
-                        const currentZones = repeaterLayout.itemAt(client.layout)
-                        const zoneItem = currentZones.repeater.itemAt(primaryZone);
-                        const itemGlobal = zoneItem.mapToGlobal(Qt.point(0, 0));
-                        const newGeometry = Qt.rect(Math.round(itemGlobal.x), Math.round(itemGlobal.y), Math.round(zoneItem.width), Math.round(zoneItem.height));
-                        log("Fullscreen client " + client.resourceClass.toString() + " to zone " + primaryZone + " with geometry " + JSON.stringify(newGeometry));
-                        client.setMaximize(false, false);
-                        client.frameGeometry = newGeometry;
-                    }
-                }
-            }
             mainDialog.hide();
         }
-
     }
 
     Components.ColorHelper {
@@ -646,32 +910,32 @@ PlasmaCore.Dialog {
     }
 
     Components.Shortcuts {
-        onCycleLayouts: {
-            setCurrentLayout((currentLayout + 1) % config.layouts.length);
-            highlightedZone = [];
-            osdDbus.exec(config.trackLayoutPerScreen ? `${config.layouts[currentLayout].name} (${Workspace.activeScreen.name})` : config.layouts[currentLayout].name);
-        }
-
-        onCycleLayoutsReversed: {
-            setCurrentLayout((currentLayout - 1 + config.layouts.length) % config.layouts.length);
-            highlightedZone = [];
-            osdDbus.exec(config.trackLayoutPerScreen ? `${config.layouts[currentLayout].name} (${Workspace.activeScreen.name})` : config.layouts[currentLayout].name);
-        }
-
         onMoveActiveWindowToNextZone: {
             const client = Workspace.activeWindow;
-            if (client.zone.length === 0) moveClientToClosestZone(client);
-            const zonesLength = config.layouts[currentLayout].zones.length;
-            const primary = (client.zone.length > 0) ? client.zone[0] : 0;
-            moveClientToZone(client, [(primary + 1) % zonesLength]);
+            if (!checkFilter(client))
+                return;
+            const layout = getLayout(client.output);
+            if (layout.zones.length === 0)
+                return;
+            if (getClientZone(client, layout).length === 0)
+                moveClientToClosestZone(client);
+            const zone = getClientZone(client, layout);
+            const primary = (zone.length > 0) ? zone[0] : 0;
+            moveClientToZone(client, [(primary + 1) % layout.zones.length], layout);
         }
 
         onMoveActiveWindowToPreviousZone: {
             const client = Workspace.activeWindow;
-            if (client.zone.length === 0) moveClientToClosestZone(client);
-            const zonesLength = config.layouts[currentLayout].zones.length;
-            const primary = (client.zone.length > 0) ? client.zone[0] : 0;
-            moveClientToZone(client, [(primary - 1 + zonesLength) % zonesLength]);
+            if (!checkFilter(client))
+                return;
+            const layout = getLayout(client.output);
+            if (layout.zones.length === 0)
+                return;
+            if (getClientZone(client, layout).length === 0)
+                moveClientToClosestZone(client);
+            const zone = getClientZone(client, layout);
+            const primary = (zone.length > 0) ? zone[0] : 0;
+            moveClientToZone(client, [(primary - 1 + layout.zones.length) % layout.zones.length], layout);
         }
 
         onToggleZoneOverlay: {
@@ -683,26 +947,30 @@ PlasmaCore.Dialog {
         }
 
         onSwitchToNextWindowInCurrentZone: {
-            const primary = (Workspace.activeWindow.zone.length > 0) ? Workspace.activeWindow.zone[0] : -1;
-            switchWindowInZone(primary, Workspace.activeWindow.layout);
+            if (!Workspace.activeWindow)
+                return;
+            const zoneTiles = getClientZoneTiles(Workspace.activeWindow);
+            if (zoneTiles.length > 0)
+                switchWindowInZone(zoneTiles[0]);
         }
 
         onSwitchToPreviousWindowInCurrentZone: {
-            const primary = (Workspace.activeWindow.zone.length > 0) ? Workspace.activeWindow.zone[0] : -1;
-            switchWindowInZone(primary, Workspace.activeWindow.layout, true);
+            if (!Workspace.activeWindow)
+                return;
+            const zoneTiles = getClientZoneTiles(Workspace.activeWindow);
+            if (zoneTiles.length > 0)
+                switchWindowInZone(zoneTiles[0], true);
         }
 
-        onMoveActiveWindowToZone: {
-            moveClientToZone(Workspace.activeWindow, [zone]);
-        }
-
-        onActivateLayout: {
-            if (layout <= config.layouts.length - 1) {
-                setCurrentLayout(layout);
-                highlightedZone = [];
-                osdDbus.exec(config.trackLayoutPerScreen ? `${config.layouts[currentLayout].name} (${Workspace.activeScreen.name})` : config.layouts[currentLayout].name);
+        onMoveActiveWindowToZone: zone => {
+            const client = Workspace.activeWindow;
+            if (!checkFilter(client))
+                return;
+            const layout = getLayout(client.output);
+            if (zone < layout.zones.length) {
+                moveClientToZone(client, [zone], layout);
             } else {
-                osdDbus.exec(`Layout ${layout + 1} does not exist`);
+                osdDbus.exec(`Zone ${zone + 1} does not exist`);
             }
         }
 
@@ -729,12 +997,16 @@ PlasmaCore.Dialog {
         onSnapAllWindows: {
             moveAllClientsToClosestZone();
         }
+
+        onRestoreActiveWindow: {
+            restoreClientGeometry(Workspace.activeWindow);
+        }
     }
 
     Component.onCompleted: {
+        mainDialog.loadConfig();
         // refresh client area
         refreshClientArea();
-        mainDialog.loadConfig();
 
         // match all clients to zones and connect signals
         for (let i = 0; i < Workspace.stackingOrder.length; i++) {
@@ -743,9 +1015,17 @@ PlasmaCore.Dialog {
         }
     }
 
+    Component.onDestruction: {
+        // the qml engine outlives the script, so leave nothing connected when the script is unloaded
+        for (let i = 0; i < Workspace.stackingOrder.length; i++) {
+            const client = Workspace.stackingOrder[i];
+            disconnectSignals(client);
+            setZoneTiles(client, []);
+        }
+    }
+
     Item {
         id: mainItem
-        property alias repeaterLayout: repeaterLayout
         width: mainDialog.width
         height: mainDialog.height
 
@@ -762,12 +1042,13 @@ PlasmaCore.Dialog {
                 refreshClientArea();
 
                 let hoveringZone = [];
+                const zones = currentLayout.zones;
 
                 // zone overlay
-                const currentZones = repeaterLayout.itemAt(currentLayout)
                 if (config.enableZoneOverlay && showZoneOverlay && !zoneSelector.expanded) {
-                    currentZones.repeater.model.forEach((zone, zoneIndex) => {
-                        if (isHovering(currentZones.repeater.itemAt(zoneIndex).children[config.zoneOverlayHighlightTarget])) {
+                    zones.forEach((zone, zoneIndex) => {
+                        const zoneItem = zoneOverlay.repeater.itemAt(zoneIndex);
+                        if (zoneItem && isHovering(zoneItem.children[config.zoneOverlayHighlightTarget])) {
                             hoveringZone = [zoneIndex];
                         }
                     });
@@ -776,15 +1057,10 @@ PlasmaCore.Dialog {
                 // zone selector
                 if (config.enableZoneSelector) {
                     if (!zoneSelector.animating && zoneSelector.expanded) {
-                        zoneSelector.repeater.model.forEach((layout, layoutIndex) => {
-                            const layoutItem = zoneSelector.repeater.itemAt(layoutIndex);
-                            layout.zones.forEach((zone, zoneIndex) => {
-                                const zoneItem = layoutItem.children[zoneIndex];
-                                if (isHovering(zoneItem)) {
-                                    hoveringZone = [zoneIndex];
-                                    setCurrentLayout(layoutIndex);
-                                }
-                            });
+                        zones.forEach((zone, zoneIndex) => {
+                            if (isHovering(zoneSelector.repeater.itemAt(zoneIndex))) {
+                                hoveringZone = [zoneIndex];
+                            }
                         });
                     }
                     // set zoneSelector expansion state
@@ -798,26 +1074,26 @@ PlasmaCore.Dialog {
                 if (config.enableEdgeMode === 1) {
                     const triggerDistance = (config.edgeSnappingTriggerDistance + 1) * 10;
                     if (Workspace.cursorPos.x <= clientArea.x + triggerDistance || Workspace.cursorPos.x >= clientArea.x + clientArea.width - triggerDistance || Workspace.cursorPos.y <= clientArea.y + triggerDistance || Workspace.cursorPos.y >= clientArea.y + clientArea.height - triggerDistance) {
-                        const padding = config.layouts[currentLayout].padding || 0;
-                        const halfPadding = padding/2;
-                        currentZones.repeater.model.forEach((zone, zoneIndex) => {
-                            const zoneItem = currentZones.repeater.itemAt(zoneIndex);
-                            const itemGlobal = zoneItem.mapToGlobal(Qt.point(0, 0));
-                            let zoneGeometry = {
-                                x: itemGlobal.x - padding/2,
-                                y: itemGlobal.y - padding/2,
-                                width: zoneItem.width + padding,
-                                height: zoneItem.height + padding
-                             };
-                            if(zoneGeometry.x <= halfPadding ) { zoneGeometry.x = 0; zoneGeometry.width += padding; }   //adjust most left edge
-                            if(zoneGeometry.y <= halfPadding ) { zoneGeometry.y = 0; zoneGeometry.height += padding; }  //adjust most top edge
-                            if(zoneGeometry.x + zoneGeometry.width >= clientArea.width - halfPadding ) {                //adjust most right edge
-                                  zoneGeometry.width += halfPadding;
-                            }
-                            if(zoneGeometry.y + zoneGeometry.height >= clientArea.height - halfPadding ) {              //adjust most bottom edge
-                                zoneGeometry.height += halfPadding;
-                            }
-                            if (isPointInside(Workspace.cursorPos.x, Workspace.cursorPos.y, zoneGeometry)) {
+                        zones.forEach((zone, zoneIndex) => {
+                            // tiles end at the panels, stretch the outer ones to the screen edge
+                            let left = zone.area.x;
+                            let top = zone.area.y;
+                            let right = zone.area.x + zone.area.width;
+                            let bottom = zone.area.y + zone.area.height;
+                            if (zone.x <= 0.01)
+                                left = clientArea.x;
+                            if (zone.y <= 0.01)
+                                top = clientArea.y;
+                            if (zone.x + zone.width >= 99.99)
+                                right = clientArea.x + clientArea.width;
+                            if (zone.y + zone.height >= 99.99)
+                                bottom = clientArea.y + clientArea.height;
+                            if (isPointInside(Workspace.cursorPos.x, Workspace.cursorPos.y, {
+                                x: left,
+                                y: top,
+                                width: right - left,
+                                height: bottom - top
+                            })) {
                                 hoveringZone = [zoneIndex];
                             }
                         });
@@ -839,14 +1115,12 @@ PlasmaCore.Dialog {
                     const span = config.zoneSpanningDistance;
                     const halfSpan = span / 2;
                     const expandedMatches = [];
-                    currentZones.repeater.model.forEach((zone, zoneIndex) => {
-                        const zoneItem = currentZones.repeater.itemAt(zoneIndex);
-                        const itemGlobal = zoneItem.mapToGlobal(Qt.point(0, 0));
+                    zones.forEach((zone, zoneIndex) => {
                         let zoneGeometry = {
-                            x: itemGlobal.x - halfSpan,
-                            y: itemGlobal.y - halfSpan,
-                            width: zoneItem.width + span,
-                            height: zoneItem.height + span
+                            x: zone.rect.x - halfSpan,
+                            y: zone.rect.y - halfSpan,
+                            width: zone.rect.width + span,
+                            height: zone.rect.height + span
                         };
                         // clamp to client area
                         if (zoneGeometry.x < clientArea.x) {
@@ -868,22 +1142,27 @@ PlasmaCore.Dialog {
                         }
                     });
                     if (expandedMatches.length >= 2) {
-                        hoveringZone = expandedMatches.sort();
+                        hoveringZone = expandedMatches;
                     }
                 }
                 // if hovering zone changed from the last frame
                 if (enableSpanning) {
-                    const isSubset = hoveringZone.every((zoneIndex) => highlightedZone.includes(zoneIndex));
-                    if (!isSubset && hoveringZone.length > 0) {
-                        const mergedZones = highlightedZone.concat(hoveringZone.filter((zoneIndex) => !highlightedZone.includes(zoneIndex)));
-                        log("Highlighting zones " + mergedZones + " in layout " + currentLayout);
-                        highlightedZone = mergedZones.slice().sort();
+                    if (spanAnchor.length === 0)
+                        spanAnchor = hoveringZone.slice();
+                    if (spanAnchor.length > 0 && hoveringZone.length > 0) {
+                        const spanZones = getSpanZones(zones, spanAnchor.concat(hoveringZone));
+                        if (spanZones.join() !== highlightedZone.join()) {
+                            log("Highlighting zones " + spanZones + " in layout " + currentLayout.key);
+                            highlightedZone = spanZones;
+                        }
                     }
-                } else if (hoveringZone != highlightedZone) {
-                    log("Highlighting zones " + hoveringZone + " in layout " + currentLayout);
-                    highlightedZone = hoveringZone.slice().sort();
+                } else if (hoveringZone.join() !== highlightedZone.join()) {
+                    log("Highlighting zones " + hoveringZone + " in layout " + currentLayout.key);
+                    highlightedZone = hoveringZone.slice().sort((a, b) => a - b);
                 }
 
+                // the cursor may be held perfectly still, so the dwell is also checked here
+                updateDwell();
             }
         }
 
@@ -895,7 +1174,8 @@ PlasmaCore.Dialog {
             method: "showText"
 
             function exec(text, icon = "preferences-desktop-virtual") {
-                if (!config.showOsdMessages) return;
+                if (!config.showOsdMessages)
+                    return;
                 this.arguments = [icon, text];
                 this.call();
             }
@@ -910,65 +1190,69 @@ PlasmaCore.Dialog {
 
             Components.Debug {
                 info: ({
-                    activeWindow: {
-                        caption: Workspace.activeWindow?.caption,
-                        resourceClass: Workspace.activeWindow?.resourceClass?.toString(),
-                        frameGeometry: {
-                            x: Workspace.activeWindow?.frameGeometry?.x,
-                            y: Workspace.activeWindow?.frameGeometry?.y,
-                            width: Workspace.activeWindow?.frameGeometry?.width,
-                            height: Workspace.activeWindow?.frameGeometry?.height
+                        activeWindow: {
+                            caption: Workspace.activeWindow?.caption,
+                            resourceClass: Workspace.activeWindow?.resourceClass?.toString(),
+                            frameGeometry: {
+                                x: Workspace.activeWindow?.frameGeometry?.x,
+                                y: Workspace.activeWindow?.frameGeometry?.y,
+                                width: Workspace.activeWindow?.frameGeometry?.width,
+                                height: Workspace.activeWindow?.frameGeometry?.height
+                            },
+                            zone: Workspace.activeWindow ? getClientZone(Workspace.activeWindow, currentLayout) : [],
+                            managedByKWin: isCustomTile(Workspace.activeWindow?.tile)
                         },
-                        zone: Workspace.activeWindow?.zone
-                    },
-                    highlightedZone: mainDialog.highlightedZone,
-                    moving: moving,
-                    resizing: resizing,
-                    oldGeometry: Workspace.activeWindow?.oldGeometry,
-                    activeScreen: activeScreen?.name,
-                        currentLayout: currentLayout,
-                        screenLayouts: screenLayouts
-                })
+                        highlightedZone: mainDialog.highlightedZone,
+                        moving: moving,
+                        resizing: resizing,
+                        oldGeometry: Workspace.activeWindow?.oldGeometry,
+                        activeScreen: activeScreen?.name,
+                        currentLayout: currentLayout.key,
+                        zones: currentLayout.zones.length
+                    })
                 errors: mainDialog.errors
                 config: mainDialog.config
             }
 
-            Repeater {
-                id: repeaterLayout
-                model: config.layouts
-
-                Components.Zones {
-                    id: zones
-                    config: mainDialog.config
-                    currentLayout: mainDialog.currentLayout
-                    highlightedZone: mainDialog.highlightedZone
-                    layoutIndex: index
-                    visible: index == mainDialog.currentLayout
-                }
+            Components.Zones {
+                id: zoneOverlay
+                config: mainDialog.config
+                layoutZones: mainDialog.currentLayout.zones
+                highlightedZone: mainDialog.highlightedZone
+                spanning: mainDialog.enableSpanning
+                spanAnchor: mainDialog.spanAnchor
+                area: mainDialog.clientArea
             }
 
             Components.Selector {
                 id: zoneSelector
                 config: mainDialog.config
-                currentLayout: mainDialog.currentLayout
+                layoutZones: mainDialog.currentLayout.zones
                 highlightedZone: mainDialog.highlightedZone
+                spanning: mainDialog.enableSpanning
+                spanAnchor: mainDialog.spanAnchor
             }
+        }
+
+        Components.DwellIndicator {
+            id: dwellIndicator
+            duration: config.dwellSpanningDelay || 600
+            x: Workspace.cursorPos.x - width / 2
+            y: Workspace.cursorPos.y - height / 2
+            onDwellFinished: finishDwell()
         }
 
         // workspace connection
         Connections {
             target: Workspace
 
+            function onCursorPosChanged() {
+                if (moving && shown)
+                    updateDwell();
+            }
+
             function onWindowAdded(client) {
                 connectSignals(client);
-
-                // check if client is in a zone application list
-                config.layouts[currentLayout].zones.forEach((zone, zoneIndex) => {
-                    if (zone.applications && zone.applications.includes(client.resourceClass.toString())) {
-                        moveClientToZone(client, [zoneIndex]);
-                        return;
-                    }
-                });
 
                 // auto snap to closest zone
                 if (config.autoSnapAllNew && checkFilter(client)) {
@@ -976,8 +1260,12 @@ PlasmaCore.Dialog {
                 }
 
                 // check if new window spawns in a zone
-                if (client.zone === undefined || client.zone.length === 0) matchZone(client);
+                if (getClientZoneTiles(client).length === 0)
+                    matchZone(client);
+            }
 
+            function onWindowRemoved(client) {
+                setZoneTiles(client, []);
             }
         }
 

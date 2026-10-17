@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.1
+
+### Fixed
+
+- The span animation in the zone indicators no longer stutters when the highlighted indicator grows at the same time.
+
 ## 1.1.0
 
 ### New

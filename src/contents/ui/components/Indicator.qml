@@ -99,31 +99,32 @@ Rectangle {
         id: spanBlock
 
         property int padding: 2
+        // position and size in percentages, animated on their own so the block follows the indicator when it is resized
+        property real boundsX: 0
+        property real boundsY: 0
+        property real boundsWidth: 0
+        property real boundsHeight: 0
+        // same whole pixel edges as the zones underneath
+        readonly property int edgeLeft: Math.round(boundsX / 100 * indicator.width)
+        readonly property int edgeTop: Math.round(boundsY / 100 * indicator.height)
+        readonly property int edgeRight: Math.round((boundsX + boundsWidth) / 100 * indicator.width)
+        readonly property int edgeBottom: Math.round((boundsY + boundsHeight) / 100 * indicator.height)
 
         function place(bounds, animated) {
             if (!bounds)
                 return;
-            // same whole pixel edges as the zones underneath
-            const left = Math.round(bounds.x / 100 * indicator.width);
-            const top = Math.round(bounds.y / 100 * indicator.height);
-            const right = Math.round((bounds.x + bounds.width) / 100 * indicator.width);
-            const bottom = Math.round((bounds.y + bounds.height) / 100 * indicator.height);
-            const targetX = left + padding;
-            const targetY = top + padding;
-            const targetWidth = Math.max(0, right - left - padding * 2);
-            const targetHeight = Math.max(0, bottom - top - padding * 2);
             if (animated) {
-                xAnimation.to = targetX;
-                yAnimation.to = targetY;
-                widthAnimation.to = targetWidth;
-                heightAnimation.to = targetHeight;
+                xAnimation.to = bounds.x;
+                yAnimation.to = bounds.y;
+                widthAnimation.to = bounds.width;
+                heightAnimation.to = bounds.height;
                 geometryAnimation.restart();
             } else {
                 geometryAnimation.stop();
-                x = targetX;
-                y = targetY;
-                width = targetWidth;
-                height = targetHeight;
+                boundsX = bounds.x;
+                boundsY = bounds.y;
+                boundsWidth = bounds.width;
+                boundsHeight = bounds.height;
             }
         }
 
@@ -133,7 +134,7 @@ Rectangle {
                 hideTimer.stop();
                 if (!visible) {
                     // start from the zone it was resting on
-                    if (width === 0 && home)
+                    if (boundsWidth === 0 && home)
                         place(home, false);
                     visible = true;
                 }
@@ -153,6 +154,10 @@ Rectangle {
 
         z: 2
         visible: false
+        x: edgeLeft + padding
+        y: edgeTop + padding
+        width: Math.max(0, edgeRight - edgeLeft - padding * 2)
+        height: Math.max(0, edgeBottom - edgeTop - padding * 2)
         color: colorHelper.accentColor
         border.color: colorHelper.getBorderColor(color)
         border.width: 1
@@ -164,28 +169,28 @@ Rectangle {
             NumberAnimation {
                 id: xAnimation
                 target: spanBlock
-                property: "x"
+                property: "boundsX"
                 duration: 150
                 easing.type: Easing.OutCubic
             }
             NumberAnimation {
                 id: yAnimation
                 target: spanBlock
-                property: "y"
+                property: "boundsY"
                 duration: 150
                 easing.type: Easing.OutCubic
             }
             NumberAnimation {
                 id: widthAnimation
                 target: spanBlock
-                property: "width"
+                property: "boundsWidth"
                 duration: 150
                 easing.type: Easing.OutCubic
             }
             NumberAnimation {
                 id: heightAnimation
                 target: spanBlock
-                property: "height"
+                property: "boundsHeight"
                 duration: 150
                 easing.type: Easing.OutCubic
             }
@@ -201,8 +206,6 @@ Rectangle {
 
     onSpanBoundsChanged: spanBlock.update()
     onActiveZoneChanged: spanBlock.update()
-    onWidthChanged: spanBlock.update()
-    onHeightChanged: spanBlock.update()
     Component.onCompleted: spanBlock.update()
 
     // dot on the zones the span started from

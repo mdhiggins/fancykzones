@@ -1,1 +1,10 @@
 *.* eol=lf
+
+# binary files must never have their line endings converted
+*.png binary
+*.gif binary
+*.jpg binary
+*.jpeg binary
+*.webm binary
+*.ico binary
+*.kwinscript binary

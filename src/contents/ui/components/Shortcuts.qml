@@ -16,6 +16,7 @@ Item {
     signal snapActiveWindow
     signal snapAllWindows
     signal restoreActiveWindow
+    signal adjustActiveWindowSpan(string direction)
 
     ShortcutHandler {
         name: "FancyKZones: Move active window to next zone"
@@ -152,6 +153,38 @@ Item {
         sequence: "Meta+Backspace"
         onActivated: {
             restoreActiveWindow();
+        }
+    }
+
+    // grow or shrink the span of the active window, the zone it started in stays and the arrows move the opposite edge
+    Repeater {
+        model: [
+            {
+                direction: "left",
+                key: "Left"
+            },
+            {
+                direction: "right",
+                key: "Right"
+            },
+            {
+                direction: "up",
+                key: "Up"
+            },
+            {
+                direction: "down",
+                key: "Down"
+            }
+        ]
+        delegate: Item {
+            ShortcutHandler {
+                name: "FancyKZones: Adjust active window span " + modelData.direction
+                text: "FancyKZones: Adjust active window span " + modelData.direction
+                sequence: "Meta+Ctrl+Alt+" + modelData.key
+                onActivated: {
+                    adjustActiveWindowSpan(modelData.direction);
+                }
+            }
         }
     }
 }

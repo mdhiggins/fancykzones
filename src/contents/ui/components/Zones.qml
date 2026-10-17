@@ -11,10 +11,24 @@ Item {
     property var highlightedZone: []
     property bool spanning: false
     property var spanAnchor: []
+    // proportions of the area the zones cover
+    property real aspectRatio: 16 / 9
+    readonly property size mapSize: getMapSize(140, 80, aspectRatio)
     // geometry of the area the zones are drawn in, zone geometries are absolute
     property var area: ({})
 
     property alias repeater: repeater
+
+    // size of a zone minimap with the proportions of the screen, about as large as a 16:9 one of the given size
+    function getMapSize(baseWidth, baseHeight, aspectRatio) {
+        const area = baseWidth * baseHeight;
+        let width = Math.sqrt(area * aspectRatio);
+        let height = width / aspectRatio;
+        // keep very wide or very tall screens within reason
+        const scale = Math.min(1, baseWidth * 2 / width, baseHeight * 2 / height);
+        // even sizes keep centered items on whole pixels
+        return Qt.size(Math.round(width * scale / 2) * 2, Math.round(height * scale / 2) * 2);
+    }
 
     Repeater {
         id: repeater
@@ -40,18 +54,23 @@ Item {
             Rectangle {
                 id: zoneIndicator
 
-                width: 160
-                height: 100
+                // grows when highlighted by resizing instead of scaling, a scaled card lands between pixels and looks blurry
+                property real zoom: active ? 1.1 : 1
+
+                width: Math.round((zones.mapSize.width + 20) * zoom / 2) * 2
+                height: Math.round((zones.mapSize.height + 20) * zoom / 2) * 2
                 color: colorHelper.backgroundColor
                 radius: 10
-                border.color: zones.spanning ? colorHelper.accentColor : colorHelper.getBorderColor(color)
-                border.width: zones.spanning ? 2 : 1
+                // spanning is shown by the badge, the border marks an included zone
+                border.color: active ? colorHelper.accentColor : colorHelper.getBorderColor(color)
+                border.width: active ? 2 : 1
                 opacity: !showZoneOverlay ? 0 : (zoneSelector.expanded) ? 0 : (active ? 0.6 : 1)
-                scale: active ? 1.1 : 1
                 visible: config.enableZoneOverlay
-                anchors.centerIn: parent
+                // centered on whole pixels
+                x: Math.round((parent.width - width) / 2)
+                y: Math.round((parent.height - height) / 2)
 
-                Behavior on scale {
+                Behavior on zoom {
                     NumberAnimation {
                         duration: zoneSelector.expanded ? 0 : 150
                     }
@@ -67,8 +86,10 @@ Item {
                     indicatorZones: renderZones
                     activeZone: [activeIndex]
                     highlightedZone: zones.highlightedZone
-                    spanZones: zones.spanning && config.zoneOverlayIndicatorDisplay != 1 && active ? zones.highlightedZone : []
-                    anchorZones: zones.spanAnchor
+                    // spanned or adjacent zones merge into one block
+                    spanZones: config.zoneOverlayIndicatorDisplay != 1 && active && (zones.spanning || zones.highlightedZone.length > 1) ? zones.highlightedZone : []
+                    // only spanning marks the zone it started from, adjacent zones have no start
+                    anchorZones: zones.spanning ? zones.spanAnchor : []
                     anchors.centerIn: parent
                     width: parent.width - 20
                     height: parent.height - 20

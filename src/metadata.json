@@ -18,7 +18,7 @@
         "ServiceTypes": [
             "KWin/Script"
         ],
-        "Version": "0.9.2",
+        "Version": "1.1.0",
         "Website": "https://github.com/mdhiggins/FancyKZones"
     },
     "X-KDE-ConfigModule": "kwin/effects/configs/kcm_kwin4_genericscripted",

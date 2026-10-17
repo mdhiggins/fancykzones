@@ -17,6 +17,8 @@ PlasmaCore.Dialog {
 
     // properties
     property bool shown: false
+    // the overlay is shown once invisibly after login, see warmUpTimer
+    property bool warmingUp: false
     property bool moving: false
     property bool moved: false
     property bool resizing: false
@@ -72,6 +74,8 @@ PlasmaCore.Dialog {
             enableEdgeMode: KWin.readConfig("enableEdgeMode", 0),
             // distance from the edge of the screen to trigger the edge snapping
             edgeSnappingTriggerDistance: KWin.readConfig("edgeSnappingTriggerDistance", 1),
+            // bumping the edge to show the overlay also starts spanning
+            bumpStartsSpanning: KWin.readConfig("bumpStartsSpanning", false),
             // remember window geometries before snapping to a zone, and restore them when the window is removed from their zone
             rememberWindowGeometries: KWin.readConfig("rememberWindowGeometries", true),
             // show osd messages
@@ -182,6 +186,8 @@ PlasmaCore.Dialog {
         const desktop = getDesktop(output);
         const rootTile = getRootTile(output, desktop);
         const screenArea = Workspace.clientArea(KWin.FullScreenArea, output, desktop);
+        // tiles cover the screen minus panels, the indicators use its proportions
+        const tileArea = Workspace.clientArea(KWin.MaximizeArea, output, desktop);
         const zones = [];
         if (rootTile) {
             getLeafTiles(rootTile).forEach(tile => {
@@ -193,7 +199,8 @@ PlasmaCore.Dialog {
         }
         return {
             key: output.name + "|" + desktop.id,
-            zones: zones
+            zones: zones,
+            aspectRatio: tileArea.height > 0 ? tileArea.width / tileArea.height : 16 / 9
         };
     }
 
@@ -236,7 +243,7 @@ PlasmaCore.Dialog {
     }
 
     function isSameLayout(a, b) {
-        if (a.key !== b.key || a.zones.length !== b.zones.length)
+        if (a.key !== b.key || a.zones.length !== b.zones.length || a.aspectRatio !== b.aspectRatio)
             return false;
         return a.zones.every((zone, i) => zone.tile === b.zones[i].tile && isSameRect(zone.rect, b.zones[i].rect));
     }
@@ -532,6 +539,120 @@ PlasmaCore.Dialog {
         return count;
     }
 
+    function getZoneBounds(zones, zoneIndices) {
+        // bounding box of zones in percentages of the screen
+        let minX = Infinity;
+        let minY = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
+        zoneIndices.forEach(zoneIndex => {
+            const zone = zones[zoneIndex];
+            minX = Math.min(minX, zone.x);
+            minY = Math.min(minY, zone.y);
+            maxX = Math.max(maxX, zone.x + zone.width);
+            maxY = Math.max(maxY, zone.y + zone.height);
+        });
+        return {
+            x: minX,
+            y: minY,
+            width: maxX - minX,
+            height: maxY - minY
+        };
+    }
+
+    function findNeighbourZones(zones, bounds, direction, exclude) {
+        // zones next to the bounds in a direction, closest first
+        // tile edges are floating point percentages
+        const epsilon = 0.5;
+        const neighbours = [];
+        zones.forEach((zone, zoneIndex) => {
+            if (exclude.includes(zoneIndex))
+                return;
+            const overlapsVertically = zone.y < bounds.y + bounds.height - epsilon && zone.y + zone.height > bounds.y + epsilon;
+            const overlapsHorizontally = zone.x < bounds.x + bounds.width - epsilon && zone.x + zone.width > bounds.x + epsilon;
+            let distance = null;
+            switch (direction) {
+            case "left":
+                if (zone.x + zone.width <= bounds.x + epsilon && overlapsVertically)
+                    distance = bounds.x - (zone.x + zone.width);
+                break;
+            case "right":
+                if (zone.x >= bounds.x + bounds.width - epsilon && overlapsVertically)
+                    distance = zone.x - (bounds.x + bounds.width);
+                break;
+            case "up":
+                if (zone.y + zone.height <= bounds.y + epsilon && overlapsHorizontally)
+                    distance = bounds.y - (zone.y + zone.height);
+                break;
+            case "down":
+                if (zone.y >= bounds.y + bounds.height - epsilon && overlapsHorizontally)
+                    distance = zone.y - (bounds.y + bounds.height);
+                break;
+            }
+            if (distance !== null)
+                neighbours.push({
+                    zoneIndex: zoneIndex,
+                    distance: distance
+                });
+        });
+        neighbours.sort((a, b) => a.distance - b.distance || a.zoneIndex - b.zoneIndex);
+        return neighbours;
+    }
+
+    function adjustClientSpan(client, direction) {
+        // like extending a selection with shift+arrows: the zone the span started in stays, the arrows move the opposite edge,
+        // so moving away from it grows the span and moving back shrinks it
+        if (!checkFilter(client))
+            return;
+
+        refreshClientArea();
+        const layout = getLayout(client.output);
+        const zones = layout.zones;
+        const clientZone = getClientZone(client, layout);
+        if (clientZone.length === 0) {
+            moveClientToClosestZone(client);
+            return;
+        }
+
+        const indexOf = tile => zones.findIndex(zone => zone.tile === tile);
+        let anchor = indexOf(client.spanAdjustAnchor);
+        let focus = indexOf(client.spanAdjustFocus);
+        // start over when the window was moved or snapped some other way since the last adjustment
+        if (anchor === -1 || focus === -1 || getSpanZones(zones, [anchor, focus]).join() !== clientZone.join()) {
+            // a span made some other way starts from its top left corner and is adjusted from its bottom right corner
+            const bounds = getZoneBounds(zones, clientZone);
+            const closestTo = (x, y, corner) => clientZone.slice().sort((a, b) => {
+                    const distance = zoneIndex => Math.abs(corner(zones[zoneIndex]).x - x) + Math.abs(corner(zones[zoneIndex]).y - y);
+                    return distance(a) - distance(b);
+                })[0];
+            anchor = closestTo(bounds.x, bounds.y, zone => ({
+                        x: zone.x,
+                        y: zone.y
+                    }));
+            focus = closestTo(bounds.x + bounds.width, bounds.y + bounds.height, zone => ({
+                        x: zone.x + zone.width,
+                        y: zone.y + zone.height
+                    }));
+        }
+
+        const neighbours = findNeighbourZones(zones, zones[focus], direction, [focus]);
+        if (neighbours.length === 0) {
+            log("No zone to adjust client " + client.resourceClass.toString() + " " + direction + " into");
+            return;
+        }
+        // with stacked zones next to the edge, move level with the zone the span started in, so moving back retraces the steps
+        const isVerticalAxis = direction === "up" || direction === "down";
+        const center = zone => isVerticalAxis ? zone.x + zone.width / 2 : zone.y + zone.height / 2;
+        const closest = neighbours.filter(neighbour => neighbour.distance <= neighbours[0].distance + 0.5);
+        closest.sort((a, b) => Math.abs(center(zones[a.zoneIndex]) - center(zones[anchor])) - Math.abs(center(zones[b.zoneIndex]) - center(zones[anchor])) || a.zoneIndex - b.zoneIndex);
+        focus = closest[0].zoneIndex;
+        const span = getSpanZones(zones, [anchor, focus]);
+        log("Adjusting client " + client.resourceClass.toString() + " " + direction + " to zones " + span);
+        client.spanAdjustAnchor = zones[anchor].tile;
+        client.spanAdjustFocus = zones[focus].tile;
+        moveClientToZone(client, span, layout);
+    }
+
     function moveClientToNeighbour(client, direction) {
         if (!checkFilter(client))
             return null;
@@ -549,52 +670,8 @@ PlasmaCore.Dialog {
             return getClientZone(client, layout);
         }
         const currentZone = zones[clientZone[0]];
-        let targetZoneIndex = -1;
-
-        let minDistance = Infinity;
-        // tile edges are floating point percentages
-        const epsilon = 0.5;
-
-        for (let i = 0; i < zones.length; i++) {
-            if (clientZone.includes(i))
-                continue;
-
-            const zone = zones[i];
-            let isNeighbour = false;
-            let distance = Infinity;
-
-            switch (direction) {
-            case "left":
-                if (zone.x + zone.width <= currentZone.x + epsilon && zone.y < currentZone.y + currentZone.height - epsilon && zone.y + zone.height > currentZone.y + epsilon) {
-                    isNeighbour = true;
-                    distance = currentZone.x - (zone.x + zone.width);
-                }
-                break;
-            case "right":
-                if (zone.x >= currentZone.x + currentZone.width - epsilon && zone.y < currentZone.y + currentZone.height - epsilon && zone.y + zone.height > currentZone.y + epsilon) {
-                    isNeighbour = true;
-                    distance = zone.x - (currentZone.x + currentZone.width);
-                }
-                break;
-            case "up":
-                if (zone.y + zone.height <= currentZone.y + epsilon && zone.x < currentZone.x + currentZone.width - epsilon && zone.x + zone.width > currentZone.x + epsilon) {
-                    isNeighbour = true;
-                    distance = currentZone.y - (zone.y + zone.height);
-                }
-                break;
-            case "down":
-                if (zone.y >= currentZone.y + currentZone.height - epsilon && zone.x < currentZone.x + currentZone.width - epsilon && zone.x + zone.width > currentZone.x + epsilon) {
-                    isNeighbour = true;
-                    distance = zone.y - (currentZone.y + currentZone.height);
-                }
-                break;
-            }
-
-            if (isNeighbour && distance < minDistance) {
-                minDistance = distance;
-                targetZoneIndex = i;
-            }
-        }
+        const neighbours = findNeighbourZones(zones, currentZone, direction, clientZone);
+        const targetZoneIndex = neighbours.length > 0 ? neighbours[0].zoneIndex : -1;
         if (targetZoneIndex !== -1) {
             moveClientToZone(client, [targetZoneIndex], layout);
         } else {
@@ -885,6 +962,8 @@ PlasmaCore.Dialog {
                 }
                 hide();
             } else if (resizing) {
+                // stop following the tile first, putting the layout back would snap the window to the tile again
+                setZoneTiles(client, []);
                 // kwin may still have moved tile edges before the window left its tile
                 restoreLayout(layoutSnapshot);
                 layoutSnapshot = [];
@@ -990,6 +1069,10 @@ PlasmaCore.Dialog {
             moveClientToNeighbour(Workspace.activeWindow, "right");
         }
 
+        onAdjustActiveWindowSpan: direction => {
+            adjustClientSpan(Workspace.activeWindow, direction);
+        }
+
         onSnapActiveWindow: {
             moveClientToClosestZone(Workspace.activeWindow);
         }
@@ -1013,6 +1096,24 @@ PlasmaCore.Dialog {
             matchZone(Workspace.stackingOrder[i]);
             connectSignals(Workspace.stackingOrder[i]);
         }
+
+        // without compositing on x11 an invisible window can't be shown, it would flash
+        if (Qt.platform.pluginName.startsWith("wayland"))
+            warmUpTimer.start();
+    }
+
+    function finishWarmUp() {
+        if (!warmingUp)
+            return;
+        warmingUp = false;
+        warmUpFallback.stop();
+        // a drag that started meanwhile keeps the overlay, as it would normally show
+        if (moving)
+            showZoneOverlay = config.zoneOverlayShowWhen == 0;
+        else
+            hide();
+        mainDialog.opacity = 1;
+        log("Overlay warmed up");
     }
 
     Component.onDestruction: {
@@ -1103,6 +1204,13 @@ PlasmaCore.Dialog {
                     if (Workspace.cursorPos.x <= clientArea.x + triggerDistance || Workspace.cursorPos.x >= clientArea.x + clientArea.width - triggerDistance || Workspace.cursorPos.y <= clientArea.y + triggerDistance || Workspace.cursorPos.y >= clientArea.y + clientArea.height - triggerDistance) {
                         if (!enteredEdge) {
                             toggleZoneOverlay();
+                            // the span starts from the first zone hovered after the bump
+                            if (config.bumpStartsSpanning && showZoneOverlay && !enableSpanning) {
+                                log("Bump started spanning");
+                                enableSpanning = true;
+                                spanAnchor = [];
+                                dwellNeedsLeave = true;
+                            }
                             enteredEdge = true;
                         }
                     } else {
@@ -1218,6 +1326,7 @@ PlasmaCore.Dialog {
                 id: zoneOverlay
                 config: mainDialog.config
                 layoutZones: mainDialog.currentLayout.zones
+                aspectRatio: mainDialog.currentLayout.aspectRatio || 16 / 9
                 highlightedZone: mainDialog.highlightedZone
                 spanning: mainDialog.enableSpanning
                 spanAnchor: mainDialog.spanAnchor
@@ -1228,6 +1337,7 @@ PlasmaCore.Dialog {
                 id: zoneSelector
                 config: mainDialog.config
                 layoutZones: mainDialog.currentLayout.zones
+                aspectRatio: mainDialog.currentLayout.aspectRatio || 16 / 9
                 highlightedZone: mainDialog.highlightedZone
                 spanning: mainDialog.enableSpanning
                 spanAnchor: mainDialog.spanAnchor
@@ -1277,6 +1387,38 @@ PlasmaCore.Dialog {
             function onConfigChanged() {
                 log("Config changed");
                 mainDialog.loadConfig();
+            }
+        }
+
+        // the first time the overlay is shown its window and graphics are set up, which makes the first drag stall
+        // show it once invisibly shortly after login instead, the graphics stay set up after hiding it
+        Timer {
+            id: warmUpTimer
+            interval: 3000
+            onTriggered: {
+                if (moving || shown)
+                    return;
+                warmingUp = true;
+                mainDialog.opacity = 0;
+                // render the indicators as well, so their effects are set up too
+                showZoneOverlay = true;
+                mainDialog.show();
+                warmUpFallback.start();
+            }
+        }
+
+        // in case no frame is drawn
+        Timer {
+            id: warmUpFallback
+            interval: 1000
+            onTriggered: finishWarmUp()
+        }
+
+        Connections {
+            target: mainDialog
+            function onFrameSwapped() {
+                if (mainDialog.warmingUp)
+                    finishWarmUp();
             }
         }
 

@@ -11,12 +11,26 @@ Item {
     property var highlightedZone: []
     property bool spanning: false
     property var spanAnchor: []
+    // proportions of the area the zones cover
+    property real aspectRatio: 16 / 9
+    readonly property size mapSize: getMapSize(130, 70, aspectRatio)
 
     property bool expanded: false
     property bool near: false
     property bool animating: false
 
     property alias repeater: indicator.repeater
+
+    // size of a zone minimap with the proportions of the screen, about as large as a 16:9 one of the given size
+    function getMapSize(baseWidth, baseHeight, aspectRatio) {
+        const area = baseWidth * baseHeight;
+        let width = Math.sqrt(area * aspectRatio);
+        let height = width / aspectRatio;
+        // keep very wide or very tall screens within reason
+        const scale = Math.min(1, baseWidth * 2 / width, baseHeight * 2 / height);
+        // even sizes keep centered items on whole pixels
+        return Qt.size(Math.round(width * scale / 2) * 2, Math.round(height * scale / 2) * 2);
+    }
 
     visible: false
     anchors.horizontalCenter: parent.horizontalCenter
@@ -47,8 +61,8 @@ Item {
         anchors.bottomMargin: 15
         color: colorHelper.backgroundColor
         radius: 10
-        border.color: selector.spanning ? colorHelper.accentColor : colorHelper.getBorderColor(color)
-        border.width: selector.spanning ? 2 : 1
+        border.color: colorHelper.getBorderColor(color)
+        border.width: 1
 
         RowLayout {
             id: row
@@ -62,10 +76,12 @@ Item {
                 indicatorZones: selector.layoutZones
                 activeZone: selector.highlightedZone
                 highlightedZone: selector.highlightedZone
-                spanZones: selector.spanning ? selector.highlightedZone : []
-                anchorZones: selector.spanAnchor
-                width: 160 - 30
-                height: 100 - 30
+                // spanned or adjacent zones merge into one block
+                spanZones: selector.spanning || selector.highlightedZone.length > 1 ? selector.highlightedZone : []
+                // only spanning marks the zone it started from, adjacent zones have no start
+                anchorZones: selector.spanning ? selector.spanAnchor : []
+                width: selector.mapSize.width
+                height: selector.mapSize.height
                 Layout.preferredWidth: width
                 Layout.preferredHeight: height
                 hovering: true

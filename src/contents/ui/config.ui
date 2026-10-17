@@ -288,6 +288,16 @@
               </item>
              </widget>
             </item>
+            <item row="1" column="0" colspan="2">
+             <widget class="QCheckBox" name="kcfg_bumpStartsSpanning">
+              <property name="text">
+               <string>Bumping starts zone spanning (Edge Bumping only)</string>
+              </property>
+              <property name="toolTip">
+               <string>When a bump shows the zone overlay, spanning starts right away from the first zone you move over. Bumping again hides the overlay and stops spanning.</string>
+              </property>
+             </widget>
+            </item>
            </layout>
           </item>
          </layout>
@@ -456,17 +466,13 @@
             <property name="text">
              <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Zones are taken from the KWin tiling layout of each screen and virtual desktop.&lt;/p&gt;&lt;p&gt;To edit a layout, press &lt;b&gt;Meta+T&lt;/b&gt; on the screen and virtual desktop you want to change. Changes are picked up automatically.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
             </property>
+            <property name="alignment">
+             <set>Qt::AlignCenter</set>
+            </property>
             <property name="wordWrap">
              <bool>true</bool>
             </property>
            </widget>
-          </item>
-          <item>
-           <spacer name="verticalSpacer_layouts">
-            <property name="orientation">
-             <enum>Qt::Vertical</enum>
-            </property>
-           </spacer>
           </item>
          </layout>
         </widget>

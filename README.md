@@ -57,13 +57,15 @@ Drop a window across multiple zones at once. Hold the cursor still on a zone ind
 The overlay makes it clear which mode you are in:
 
 - the zone indicators and the zone selector show the span as a single merged block, with a dot on the zone the span started from
-- a chain link badge pops up on every indicator and the indicator borders light up
+- a chain link badge pops up on every indicator
+
+In both modes, the indicator of each zone the window will be placed in gets an accent border and shows its zone in the accent color, the other indicators show their zone in a muted version of it.
 
 ![](./media/spanning.gif)
 
 ### Edge Bumping
 
-Bump a window into the edge of the screen to show the zone overlay, bump it again to hide it. Useful when the overlay is set to only show when asked for.
+Bump a window into the edge of the screen to show the zone overlay, bump it again to hide it. Useful when the overlay is set to only show when asked for. Optionally the bump can start zone spanning straight away.
 
 ### KWin Tiling Layouts
 
@@ -122,6 +124,7 @@ Edge Bumping shows the zone overlay when you bump a window into the edge of the 
 
 - Choose between edge snapping, edge bumping or disabled.
 - Set the distance from the edge of the screen at which edge snapping or bumping triggers.
+- Edge bumping only: optionally let the bump start zone spanning right away, the span starts from the first zone you move over. Off by default.
 
 #### Remember and restore window geometries
 
@@ -152,6 +155,7 @@ A window can be dropped across multiple zones at once. While spanning, the windo
 - Hold the cursor still on the indicator in the middle of a zone (or on a zone in the zone selector) while moving a window, a ring around the cursor fills up and spanning starts from that zone. Move off the indicator and hold still on any zone indicator again to stop spanning, the ring drains instead. The delay can be changed, or this can be disabled.
 - While spanning, the indicators show the span as one merged block and a chain link badge.
 - Press the toggle zone spanning shortcut while moving a window.
+- Without dragging, adjust the span of the active window with <kbd>Meta</kbd> + <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + arrow keys, like FancyZones. The zone the window started in stays put, pressing away from it grows the span and pressing back shrinks it again, like extending a selection with <kbd>Shift</kbd> + arrow keys.
 - Set an adjacent zone spanning distance, dropping a window this close to the border between zones spans them.
 
 #### Fade windows while moving
@@ -210,11 +214,14 @@ List of all available shortcuts:
 | Snap all windows                                   | <kbd>Meta</kbd> + <kbd>Space</kbd>                                  |
 | Snap active window                                 | <kbd>Meta</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd>               |
 | Restore active window to its pre-zone geometry     | <kbd>Meta</kbd> + <kbd>Backspace</kbd>                              |
+| Adjust active window span left/right/up/down       | <kbd>Meta</kbd> + <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>Arrows</kbd>                |
 
 *To change the default bindings, go to `System Settings / Shortcuts` and search for FancyKZones*
 
 > [!NOTE]  
-> Not all shortcuts will be bound by default as they conflift with existing system bindings.
+> Not all shortcuts will be bound by default as they conflict with existing system bindings.
+>
+> <kbd>Meta</kbd> + <kbd>Arrows</kbd> is also used by KWin's own "Quick Tile Window to the Left/Right/Top/Bottom" shortcuts, which snap windows to halves and quarters of the screen instead of your zones. To use it for moving between zones, go to `System Settings / Keyboard / Shortcuts / KWin`, clear those four Quick Tile shortcuts, then make sure the FancyKZones "Move active window" shortcuts are set to <kbd>Meta</kbd> + <kbd>Arrows</kbd>.
 
 ## Tips and Tricks
 

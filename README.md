@@ -1,6 +1,6 @@
 # FancyKZones
 
-<img align="right" width="125" height="75" src="./media/icon.png">
+<img align="right" width="125" height="125" src="./media/logo.png">
 
 KDE KWin Script for snapping windows into zones. Handy when using a (super) ultrawide monitor, an alternative to PowerToys FancyZones and Windows 11 snap layouts.
 

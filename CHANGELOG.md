@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.2
+
+### Fixed
+
+- When a zone joins a span, the dot marking where the span started now appears once the block has grown over it, instead of showing up ahead of the block.
+
 ## 1.1.1
 
 ### Fixed

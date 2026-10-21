@@ -222,6 +222,14 @@ Rectangle {
             x: Math.round((zone.x + zone.width / 2) / 100 * indicator.width - width / 2)
             y: Math.round((zone.y + zone.height / 2) / 100 * indicator.height - height / 2)
             color: colorHelper.backgroundColor
+            // only shown once the block has grown over it, so the block expands to the whole span first like adjacent zones do
+            opacity: spanBlock.visible && x >= spanBlock.x && x + width <= spanBlock.x + spanBlock.width && y >= spanBlock.y && y + height <= spanBlock.y + spanBlock.height ? 1 : 0
+
+            Behavior on opacity {
+                NumberAnimation {
+                    duration: 100
+                }
+            }
         }
     }
 
